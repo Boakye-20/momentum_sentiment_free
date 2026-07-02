@@ -170,7 +170,7 @@ def fetch_history(tickers: list[str], start: str, end: str,
     tf = pd.Timestamp(start).strftime("%Y%m%dT0000")
     tt = pd.Timestamp(end).strftime("%Y%m%dT2359")
 
-    have = _already_cached(set(tickers))
+    have = _already_cached(set(tickers), start=start)
     todo = [t for t in tickers if t not in have]
     if not todo:
         print("[AV] history already cached for all requested tickers.")
@@ -201,12 +201,25 @@ def fetch_history(tickers: list[str], start: str, end: str,
     return pd.concat(fetched, ignore_index=True) if fetched else pd.DataFrame()
 
 
-def _already_cached(tickers: set[str], path: str | None = None) -> set[str]:
+def _already_cached(tickers: set[str], start: str | None = None,
+                    path: str | None = None) -> set[str]:
+    """
+    Tickers whose HISTORY fetch already ran for a window beginning at `start`.
+    A history fetch (sort=EARLIEST) always produces rows near `start`, while a
+    lone fetch_today snapshot row is dated ~today — so requiring the earliest
+    cached row to sit within 90 days of `start` stops snapshot rows from
+    masking tickers that still need their history pulled.
+    """
     path = path or CFG.paths.sentiment_log
     if not Path(path).exists():
         return set()
-    df = pd.read_csv(path)
+    df = pd.read_csv(path, parse_dates=["date"])
     if "source" not in df.columns:
         return set()
     av = df[df["source"] == AV_SOURCE]
-    return set(av["ticker"].unique()) & tickers
+    if av.empty:
+        return set()
+    if start is None:
+        return set(av["ticker"].unique()) & tickers
+    first = av.groupby("ticker")["date"].min()
+    return set(first[first <= pd.Timestamp(start) + pd.Timedelta(days=90)].index) & tickers

@@ -34,6 +34,9 @@ python tests/test_smoke.py               # full pipeline test, no network needed
 - `src/av_sentiment.py` — Alpha Vantage NEWS_SENTIMENT. Real history back to
   ~2022. Free tier caps at ~25 requests/day — `fetch_history()` caches and
   skips already-fetched tickers, designed to run incrementally across days.
+  `_already_cached` requires a ticker's earliest AV row to sit within 90 days
+  of the requested start — a lone `fetch_today` snapshot row must never mask
+  a ticker that still needs its history pulled (that bug hid 25 tickers).
 - `src/signals.py` — turns momentum + sentiment panels into target weights.
 - `src/backtest.py` — daily-mark-to-market vector backtest. Metrics MUST be
   annualised from daily returns (`×252` / `×√252`), never from the monthly
@@ -66,6 +69,16 @@ python tests/test_smoke.py               # full pipeline test, no network needed
 UI, holds the design tokens), `data-ops` (price cache, sentiment fetching,
 AV rate budget). Prefer them for work in their lane — each carries the
 project-specific pitfalls for its area.
+
+## Data status (update when fetches run)
+
+- AV sentiment history (2022-03-01 → 2025-12-31) in
+  `data/sentiment_history.csv`: **25/30 tickers** as of 2026-07-03.
+  Missing: DIS, NKE, WMT, UNH, HON — daily budget hit; the next
+  `fetch_history()` run resumes there automatically.
+- Known limitation: the 1000-article request cap truncates busy tickers'
+  history early (e.g. INTC ends 2024-05, IBM 2025-01). A resume-from-last-
+  cached-date fetch would fill the gaps — open TODO.
 
 ## Conventions
 
