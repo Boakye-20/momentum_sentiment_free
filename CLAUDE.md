@@ -70,6 +70,16 @@ UI, holds the design tokens), `data-ops` (price cache, sentiment fetching,
 AV rate budget). Prefer them for work in their lane — each carries the
 project-specific pitfalls for its area.
 
+## Automation
+
+A Windows Task Scheduler job ("MomentumSentiment Daily Fetch", daily 07:30,
+runs on next boot if missed) executes `scripts/daily_fetch.py` via
+`scripts/daily_fetch.cmd`: free RSS+VADER snapshot → incremental Alpha
+Vantage history (no-op once complete) → auto-commits
+`data/sentiment_history.csv`. Output goes to `outputs/daily_fetch.log`.
+The .cmd wrapper hardcodes the repo and python paths — update it if either
+moves. Manage with `Get-ScheduledTask`/`Unregister-ScheduledTask`.
+
 ## Data status (update when fetches run)
 
 - AV sentiment history (2022-03-01 → 2025-12-31) in

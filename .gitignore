@@ -8,6 +8,7 @@ data/price_cache.parquet
 outputs/*.png
 outputs/*.md
 outputs/*.csv
+outputs/*.log
 # NOTE: data/sentiment_history.csv is deliberately TRACKED — free-source
 # sentiment rows are recent-only news and can never be re-fetched.
 .claude/settings.local.json
