@@ -59,6 +59,14 @@ python tests/test_smoke.py               # full pipeline test, no network needed
 3. **Annualise from daily data, not monthly.** The equity curve must be
    marked to market daily before computing Sharpe/vol/drawdown.
 
+## Project agents
+
+`.claude/agents/` defines three subagents for delegated work: `quant-researcher`
+(signal/backtest changes and A/B experiments), `dashboard-engineer` (Streamlit
+UI, holds the design tokens), `data-ops` (price cache, sentiment fetching,
+AV rate budget). Prefer them for work in their lane — each carries the
+project-specific pitfalls for its area.
+
 ## Conventions
 
 - All money in £ in UI/report labels (user is UK-based) but yfinance returns
