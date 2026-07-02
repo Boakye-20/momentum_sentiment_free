@@ -1,0 +1,15 @@
+# Free data + analysis stack — no paid APIs required.
+pandas>=2.2
+numpy>=1.26
+yfinance>=0.2.40        # free price data (Yahoo Finance)
+feedparser>=6.0         # free news via RSS
+vaderSentiment>=3.3.2   # offline sentiment scoring (no model download)
+requests>=2.31          # Alpha Vantage NEWS_SENTIMENT calls
+matplotlib>=3.8         # static report charts
+pyarrow>=15.0           # parquet price cache
+
+# Dashboard (Bloomberg-style terminal UI)
+streamlit>=1.43         # web UI; run: python -m streamlit run dashboard.py
+plotly>=5.20            # interactive dark charts
+
+pytest>=8.0             # tests (optional)
