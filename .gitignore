@@ -11,5 +11,6 @@ outputs/*.csv
 # NOTE: data/sentiment_history.csv is deliberately TRACKED — free-source
 # sentiment rows are recent-only news and can never be re-fetched.
 .claude/settings.local.json
+.claude/scheduled_tasks.lock
 .DS_Store
 .pytest_cache/
