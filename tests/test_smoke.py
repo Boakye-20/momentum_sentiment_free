@@ -62,6 +62,38 @@ def test_inverse_vol_weights():
             "long weights must be proportional to 1/realised vol"
 
 
+def test_av_resume_points(tmp_path=None):
+    from src.av_sentiment import _resume_from
+
+    out_dir = Path(tmp_path) if tmp_path else Path("outputs")
+    out_dir.mkdir(exist_ok=True)
+    csv = out_dir / "_test_av_resume.csv"
+
+    rows = []
+    # A: history truncated mid-2023, PLUS a recent snapshot row that must not
+    #    mask the gap -> resume the day after the contiguous block ends.
+    for d in pd.date_range("2022-03-01", "2023-06-05", freq="7D"):
+        rows.append({"date": d, "ticker": "A", "score": 0.1, "source": "alphavantage"})
+    rows.append({"date": pd.Timestamp("2026-06-30"), "ticker": "A",
+                 "score": 0.2, "source": "alphavantage"})
+    # B: history reaches within the tail tolerance of the window end -> done.
+    for d in pd.date_range("2022-03-01", "2025-12-20", freq="30D"):
+        rows.append({"date": d, "ticker": "B", "score": 0.1, "source": "alphavantage"})
+    # C: only a snapshot row -> fetch from the window start.
+    rows.append({"date": pd.Timestamp("2026-06-30"), "ticker": "C",
+                 "score": 0.3, "source": "alphavantage"})
+    pd.DataFrame(rows).to_csv(csv, index=False)
+
+    r = _resume_from({"A", "B", "C", "D"}, "2022-03-01", "2025-12-31", path=str(csv))
+    csv.unlink()
+
+    block_end_a = pd.date_range("2022-03-01", "2023-06-05", freq="7D")[-1]
+    assert r["A"] == block_end_a + pd.Timedelta(days=1)
+    assert r["B"] is None
+    assert r["C"] == pd.Timestamp("2022-03-01")
+    assert r["D"] == pd.Timestamp("2022-03-01")   # never fetched
+
+
 def test_vader_scoring_offline():
     pos = sent_mod.score_text("Shares soar after blowout earnings beat")
     neg = sent_mod.score_text("Stock plunges amid fraud probe and lawsuits")
@@ -72,5 +104,6 @@ if __name__ == "__main__":
     test_backtest_runs_and_trades()
     test_tsm_skips_recent_month()
     test_inverse_vol_weights()
+    test_av_resume_points()
     test_vader_scoring_offline()
     print("\nAll smoke tests passed.")

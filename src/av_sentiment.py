@@ -26,6 +26,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 from config import CFG
@@ -160,29 +161,31 @@ def fetch_history(tickers: list[str], start: str, end: str,
                   pause: float = 1.0) -> pd.DataFrame:
     """
     Pull historical daily sentiment and append to the rolling log (cached).
-    Spends at most `max_requests` API calls; tickers already fully cached for the
-    window are skipped, so run it across several days to cover a big universe.
-    Returns the daily rows fetched this run.
+    Spends at most `max_requests` API calls. Each ticker RESUMES from the end
+    of its contiguous cached history: the 1000-article request cap truncates
+    busy tickers early, so covering the full window can take several calls,
+    spread across daily budgets. Fully covered tickers cost nothing. Returns
+    the daily rows fetched this run.
     """
     api_key = get_api_key(api_key)
     if not api_key:
         raise RuntimeError("No Alpha Vantage API key (set ALPHAVANTAGE_API_KEY in .env).")
-    tf = pd.Timestamp(start).strftime("%Y%m%dT0000")
     tt = pd.Timestamp(end).strftime("%Y%m%dT2359")
 
-    have = _already_cached(set(tickers), start=start)
-    todo = [t for t in tickers if t not in have]
+    resume = _resume_from(set(tickers), start, end)
+    todo = [(t, resume[t]) for t in tickers if resume[t] is not None]
     if not todo:
         print("[AV] history already cached for all requested tickers.")
         return pd.DataFrame()
     print(f"[AV] fetching history for {min(len(todo), max_requests)} ticker(s) "
-          f"(of {len(todo)} remaining), {start} -> {end} ...")
+          f"(of {len(todo)} incomplete), window end {end} ...")
 
     fetched = []
-    for t in todo[:max_requests]:
-        print(f"  [AV] {t} ...")
+    for t, frm in todo[:max_requests]:
+        print(f"  [AV] {t} (from {frm:%Y-%m-%d}) ...")
         try:
-            rows = fetch_ticker(t, api_key, time_from=tf, time_to=tt,
+            rows = fetch_ticker(t, api_key,
+                                time_from=frm.strftime("%Y%m%dT0000"), time_to=tt,
                                 sort="EARLIEST", limit=1000)
         except RuntimeError as e:
             print(f"  [AV] stopped at {t}: {e}")
@@ -196,30 +199,50 @@ def fetch_history(tickers: list[str], start: str, end: str,
 
     remaining = len(todo) - len(fetched)
     if remaining > 0:
-        print(f"[AV] {remaining} ticker(s) left — run again tomorrow (free tier "
-              f"is ~25 requests/day). Cached data is reused automatically.")
+        print(f"[AV] {remaining} ticker(s) still incomplete — run again tomorrow "
+              f"(free tier is ~25 requests/day). Cached data is reused "
+              f"automatically and each run resumes where the last stopped.")
     return pd.concat(fetched, ignore_index=True) if fetched else pd.DataFrame()
 
 
-def _already_cached(tickers: set[str], start: str | None = None,
-                    path: str | None = None) -> set[str]:
+# A hole bigger than this in a ticker's cached dates marks the end of its
+# contiguous history block (isolated fetch_today snapshot rows sit beyond it).
+_GAP_DAYS = 60
+# Treat history as complete once it reaches within this of the window end,
+# so sparse news around the tail can't trigger a re-fetch every day.
+_TAIL_TOLERANCE_DAYS = 30
+
+
+def _resume_from(tickers: set[str], start: str, end: str,
+                 path: str | None = None) -> dict:
     """
-    Tickers whose HISTORY fetch already ran for a window beginning at `start`.
-    A history fetch (sort=EARLIEST) always produces rows near `start`, while a
-    lone fetch_today snapshot row is dated ~today — so requiring the earliest
-    cached row to sit within 90 days of `start` stops snapshot rows from
-    masking tickers that still need their history pulled.
+    Per ticker, where the next history fetch should start:
+      pd.Timestamp -> fetch from this date (window start, or the day after the
+                      contiguous cached block ends — i.e. the truncation point)
+      None         -> window already covered, skip.
+    A lone fetch_today snapshot row is dated ~today; the gap rule keeps it out
+    of the contiguous block, so it can never mask missing history.
     """
+    start_ts, end_ts = pd.Timestamp(start), pd.Timestamp(end)
+    done_from = end_ts - pd.Timedelta(days=_TAIL_TOLERANCE_DAYS)
+    out = {t: start_ts for t in tickers}
+
     path = path or CFG.paths.sentiment_log
     if not Path(path).exists():
-        return set()
+        return out
     df = pd.read_csv(path, parse_dates=["date"])
     if "source" not in df.columns:
-        return set()
+        return out
     av = df[df["source"] == AV_SOURCE]
-    if av.empty:
-        return set()
-    if start is None:
-        return set(av["ticker"].unique()) & tickers
-    first = av.groupby("ticker")["date"].min()
-    return set(first[first <= pd.Timestamp(start) + pd.Timedelta(days=90)].index) & tickers
+
+    for t, g in av.groupby("ticker"):
+        if t not in out:
+            continue
+        dates = pd.DatetimeIndex(g["date"].sort_values().unique())
+        if dates[0] > start_ts + pd.Timedelta(days=90):
+            continue                      # snapshot rows only -> fetch from start
+        gaps = np.where(np.diff(dates.values)
+                        > np.timedelta64(_GAP_DAYS, "D"))[0]
+        block_end = dates[gaps[0]] if len(gaps) else dates[-1]
+        out[t] = None if block_end >= done_from else block_end + pd.Timedelta(days=1)
+    return out
