@@ -1,6 +1,19 @@
 [theme]
-base = "dark"
-primaryColor = "#e8a33d"
-backgroundColor = "#101419"
-secondaryBackgroundColor = "#151a21"
-textColor = "#dce3ec"
+base = "light"
+primaryColor = "#6366F1"
+backgroundColor = "#F5F7FB"
+secondaryBackgroundColor = "#FFFFFF"
+textColor = "#1C2434"
+linkColor = "#6366F1"
+borderColor = "#E8ECF4"
+font = "sans serif"
+
+# NextAdmin-style light sidebar: white, dark text, indigo active accents.
+# Native sidebar theming (Streamlit >= 1.46) keeps every widget readable —
+# do NOT re-style the sidebar with CSS testid hacks in dashboard.py.
+[theme.sidebar]
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F5F7FB"
+textColor = "#1C2434"
+primaryColor = "#6366F1"
+borderColor = "#E8ECF4"

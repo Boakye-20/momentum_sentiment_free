@@ -26,7 +26,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 os.chdir(ROOT)
 
-from config import CFG  # noqa: E402
+from config import CFG, av_fetch_order  # noqa: E402
 
 
 def _git(*args: str) -> subprocess.CompletedProcess:
@@ -38,6 +38,14 @@ def main() -> int:
     print(f"\n=== daily fetch {datetime.now():%Y-%m-%d %H:%M:%S} ===", flush=True)
     ok = True
 
+    # Keep the price cache current so the dashboard/API never serve stale
+    # prices. yfinance first, Twelve Data fallback (slow but free) if set.
+    try:
+        from src.data import refresh_price_cache
+        refresh_price_cache()
+    except Exception as e:
+        print(f"[daily] price cache refresh failed: {e}")
+
     try:
         from src import sentiment as sent_mod
         snap = sent_mod.fetch_all_sentiment(CFG.universe.tickers)
@@ -48,7 +56,9 @@ def main() -> int:
 
     try:
         from src import av_sentiment as av
-        av.fetch_history(CFG.universe.tickers, "2022-03-01",
+        # Sleeve-priority order: quality-value + niche first — sentiment
+        # history matters most where analyst/news coverage is thinnest.
+        av.fetch_history(av_fetch_order(), "2022-03-01",
                          CFG.universe.end_date)
     except Exception as e:
         # A missing key or exhausted budget shouldn't kill the free-side run.

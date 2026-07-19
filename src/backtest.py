@@ -93,6 +93,17 @@ def _metrics(equity, benchmark, daily, trades) -> dict:
     b_total = b.iloc[-1] / b.iloc[0] - 1
     b_cagr = (1 + b_total) ** (1 / n_years) - 1 if n_years > 0 else 0.0
 
+    # Regression stats vs benchmark daily returns (annualised alpha, beta,
+    # and information ratio on the active return stream).
+    b_daily = b.pct_change().reindex(daily.index).fillna(0.0)
+    beta, alpha_ann, info_ratio = 0.0, 0.0, 0.0
+    if b_daily.std() > 0:
+        beta = float(daily.cov(b_daily) / b_daily.var())
+        alpha_ann = float((daily.mean() - beta * b_daily.mean()) * 252)
+        active = daily - b_daily
+        te = active.std() * np.sqrt(252)
+        info_ratio = float(active.mean() * 252 / te) if te > 0 else 0.0
+
     win = (trades["return_pct"] > 0).mean() if len(trades) else 0.0
     return {
         "total_return_pct": round(total * 100, 2),
@@ -104,6 +115,9 @@ def _metrics(equity, benchmark, daily, trades) -> dict:
         "sortino": round(sortino, 3),
         "calmar": round(calmar, 3),
         "max_drawdown_pct": round(max_dd * 100, 2),
+        "beta": round(beta, 2),
+        "alpha_ann_pct": round(alpha_ann * 100, 2),
+        "information_ratio": round(info_ratio, 3),
         "n_trades": int(len(trades)),
         "win_rate_pct": round(win * 100, 2),
         "avg_trade_pct": round(trades["return_pct"].mean(), 2) if len(trades) else 0.0,

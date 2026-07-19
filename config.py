@@ -12,6 +12,7 @@ Data is 100% free:
 """
 
 from __future__ import annotations
+import datetime as _dt
 from dataclasses import dataclass, field
 from typing import Dict, List
 
@@ -19,18 +20,104 @@ from typing import Dict, List
 # ──────────────────────────────────────────────────────────────────────────
 # Universe
 # ──────────────────────────────────────────────────────────────────────────
+# Three-sleeve universe design (core / quality-value / niche growth).
+# CORE keeps every ticker that already has Alpha Vantage sentiment history
+# banked — dropping one throws away weeks of fetched daily budget.
+SLEEVE_CORE: List[str] = [
+    # ── Mega-cap tech ──────────────────────────────────────────────────────
+    "AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "META", "TSLA", "NFLX", "AMD",
+    "ORCL", "ADBE", "CRM", "NOW", "UBER", "AVGO", "QCOM", "TXN", "CSCO",
+    "IBM", "INTC",
+    # ── Financials ─────────────────────────────────────────────────────────
+    "JPM", "BAC", "GS", "V", "MA", "AXP", "MS", "C", "WFC", "BLK",
+    "SCHW", "TRV",
+    # ── Healthcare ─────────────────────────────────────────────────────────
+    "JNJ", "MRK", "UNH", "LLY", "ABBV", "AMGN",
+    # ── Consumer ───────────────────────────────────────────────────────────
+    "HD", "MCD", "KO", "PG", "WMT", "NKE", "DIS", "COST",
+    # ── Energy ─────────────────────────────────────────────────────────────
+    "CVX", "XOM", "COP", "EOG",
+    # ── Industrials / comms ────────────────────────────────────────────────
+    "CAT", "HON", "GE", "BA", "RTX", "LMT", "DE", "VZ",
+]
+
+# Underrated quality/value: high-ROE, reasonable-multiple compounders with
+# thin media coverage — the sleeve where the sentiment + fundamentals layers
+# have the most room to add signal.
+SLEEVE_QUALITY_VALUE: List[str] = [
+    # ── Healthcare plumbing + cheap pharma ─────────────────────────────────
+    "MCK", "COR", "CAH", "CI", "ELV", "BMY", "GILD", "VRTX",
+    # ── Insurers ───────────────────────────────────────────────────────────
+    "CB", "AFL", "ALL", "MET",
+    # ── Boring dominators / distribution ───────────────────────────────────
+    "AZO", "ORLY", "CASY", "TXRH", "MUSA", "GWW", "FAST", "WSO",
+    # ── Industrial compounders ─────────────────────────────────────────────
+    "EME", "FIX", "LECO",
+    # ── Cyclical-value semis ───────────────────────────────────────────────
+    "MU", "ON", "SWKS",
+    # ── Homebuilders ───────────────────────────────────────────────────────
+    "DHI", "LEN", "PHM", "TOL",
+    # ── Consumer quality ───────────────────────────────────────────────────
+    "DECK", "WSM",
+]
+
+# Moderate niche growth: liquid, profitable (or near it), covered-but-not-
+# saturated. Deliberately excludes the most speculative story stocks
+# (COIN/RBLX/ROKU tier) — see CLAUDE.md on survivorship bias.
+SLEEVE_NICHE_GROWTH: List[str] = [
+    "CRWD", "NET", "DDOG", "FTNT", "ZS", "AXON", "MDB", "TTD", "HUBS",
+    "SNOW", "PLTR", "SHOP", "SE", "SPOT", "CELH", "LULU", "CMG",
+    "KLAC", "AMAT", "LRCX", "MRVL", "NXPI",
+]
+
+# Global (ex-US) exposure via US-listed ADRs ONLY — native listings (.L,
+# .T, .DE …) break Alpha Vantage sentiment and yfinance fundamentals, and
+# LSE quotes are in pence. ADRs keep every data layer working and in USD.
+SLEEVE_GLOBAL: List[str] = [
+    # ── Europe ─────────────────────────────────────────────────────────────
+    "ASML", "SAP", "NVO", "AZN", "GSK", "SNY", "SHEL", "BP", "TTE", "UL",
+    "RIO",
+    # ── Asia ───────────────────────────────────────────────────────────────
+    "TSM", "SONY", "TM", "BABA", "INFY", "BHP",
+    # ── Latin America ──────────────────────────────────────────────────────
+    "MELI", "NU", "VALE",
+]
+
+SLEEVES: Dict[str, List[str]] = {
+    "core":          SLEEVE_CORE,
+    "quality_value": SLEEVE_QUALITY_VALUE,
+    "niche_growth":  SLEEVE_NICHE_GROWTH,
+    "global":        SLEEVE_GLOBAL,
+}
+
+# Ticker -> sleeve name, for screener views and fetch prioritisation.
+TICKER_SLEEVE: Dict[str, str] = {
+    t: name for name, ts in SLEEVES.items() for t in ts
+}
+
+
+def av_fetch_order() -> List[str]:
+    """Ticker order for the daily Alpha Vantage budget: quality-value and
+    niche sleeves first — sentiment history is worth most where coverage is
+    thinnest — then global ADRs, then core (whose completed tickers cost
+    nothing anyway)."""
+    return (SLEEVE_QUALITY_VALUE + SLEEVE_NICHE_GROWTH
+            + SLEEVE_GLOBAL + SLEEVE_CORE)
+
+
 @dataclass
 class UniverseConfig:
-    # A liquid, large-cap default set (DJIA-style). Edit freely.
-    tickers: List[str] = field(default_factory=lambda: [
-        "AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "META", "JPM", "BAC", "GS", "V",
-        "HD", "MCD", "KO", "PG", "JNJ", "MRK", "CVX", "CAT", "CRM", "CSCO",
-        "DIS", "NKE", "WMT", "UNH", "HON", "IBM", "INTC", "VZ", "AXP", "TRV",
-    ])
+    # Full four-sleeve universe (~132 names). Edit the sleeve lists above.
+    tickers: List[str] = field(default_factory=lambda: (
+        SLEEVE_CORE + SLEEVE_QUALITY_VALUE
+        + SLEEVE_NICHE_GROWTH + SLEEVE_GLOBAL
+    ))
     benchmark_ticker: str = "SPY"          # free ETF proxy for the market
-    # Backtest window (prices are free and historical for these dates).
+    # Price window. end_date is dynamic (today) so the screener always shows
+    # current prices — a hardcoded end once left the app 7 months stale.
     start_date: str = "2015-01-01"
-    end_date: str = "2025-12-31"
+    end_date: str = field(
+        default_factory=lambda: _dt.date.today().isoformat())
 
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -47,6 +134,11 @@ class MomentumConfig:
     short_ma: int = 20
     long_ma: int = 150               # long-trend filter MA
     breadth_ma: int = 200            # MA used for market-breadth regime
+    # Market-regime detector: "breadth" (fraction of universe above its long
+    # MA — free, simple, default) or "hmm" (3-state Gaussian HMM on market
+    # return/vol/dispersion, walk-forward refit — needs `pip install hmmlearn`,
+    # falls back to breadth if unavailable). See src/regime.py.
+    regime_method: str = "breadth"
 
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -145,36 +237,181 @@ class Config:
 
 CFG = Config()
 
+# Ticker -> sector, used for screener filtering and sector-relative views.
+# Mirrors the groupings of UniverseConfig.tickers above — keep in sync.
+SECTORS: Dict[str, str] = {
+    **{t: "Tech" for t in [
+        "AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "META", "TSLA", "NFLX",
+        "AMD", "ORCL", "ADBE", "CRM", "NOW", "UBER", "AVGO", "QCOM", "TXN",
+        "CSCO", "IBM", "INTC"]},
+    **{t: "Financials" for t in [
+        "JPM", "BAC", "GS", "V", "MA", "AXP", "MS", "C", "WFC", "BLK",
+        "SCHW", "TRV", "CB", "AFL", "ALL", "MET"]},
+    **{t: "Healthcare" for t in [
+        "JNJ", "MRK", "UNH", "LLY", "ABBV", "AMGN", "BMY", "GILD", "VRTX",
+        "MCK", "COR", "CAH", "CI", "ELV"]},
+    **{t: "Consumer" for t in [
+        "HD", "MCD", "KO", "PG", "WMT", "NKE", "DIS", "COST", "CMG", "LULU",
+        "AZO", "ORLY", "CASY", "TXRH", "MUSA", "DECK", "WSM"]},
+    **{t: "Energy" for t in ["CVX", "XOM", "COP", "EOG"]},
+    **{t: "Industrials" for t in [
+        "CAT", "HON", "GE", "BA", "RTX", "LMT", "DE", "VZ",
+        "GWW", "FAST", "WSO", "EME", "FIX", "LECO",
+        "DHI", "LEN", "PHM", "TOL"]},
+    **{t: "Semis" for t in [
+        "KLAC", "AMAT", "LRCX", "MRVL", "NXPI", "MU", "ON", "SWKS",
+        "ASML", "TSM"]},
+    **{t: "Growth" for t in [
+        "CRWD", "NET", "DDOG", "FTNT", "ZS", "AXON", "MDB", "CELH", "TTD",
+        "SPOT", "HUBS", "SNOW", "PLTR", "SHOP", "SE", "MELI", "NU"]},
+    **{t: "Tech" for t in ["SAP", "INFY"]},
+    **{t: "Healthcare" for t in ["NVO", "AZN", "GSK", "SNY"]},
+    **{t: "Energy" for t in ["SHEL", "BP", "TTE"]},
+    **{t: "Consumer" for t in ["UL", "TM", "SONY", "BABA"]},
+    **{t: "Materials" for t in ["RIO", "BHP", "VALE"]},
+}
+
 # Ticker -> name variants used to attribute free headlines to a stock.
 COMPANY_KEYWORDS: Dict[str, List[str]] = {
-    "AAPL": ["apple", "iphone", "tim cook"],
-    "MSFT": ["microsoft", "azure", "satya nadella"],
-    "GOOGL": ["google", "alphabet", "android", "sundar pichai"],
-    "AMZN": ["amazon", "aws", "andy jassy"],
-    "NVDA": ["nvidia", "jensen huang"],
-    "META": ["meta", "facebook", "instagram", "zuckerberg"],
-    "JPM": ["jpmorgan", "jp morgan", "jamie dimon"],
-    "BAC": ["bank of america", "bofa"],
-    "GS": ["goldman sachs", "goldman"],
-    "V": ["visa inc"],
-    "HD": ["home depot"],
-    "MCD": ["mcdonald", "mcdonald's"],
-    "KO": ["coca-cola", "coca cola"],
-    "PG": ["procter & gamble", "procter and gamble"],
-    "JNJ": ["johnson & johnson", "johnson and johnson"],
-    "MRK": ["merck"],
-    "CVX": ["chevron"],
-    "CAT": ["caterpillar"],
-    "CRM": ["salesforce", "marc benioff"],
-    "CSCO": ["cisco"],
-    "DIS": ["disney", "walt disney"],
-    "NKE": ["nike"],
-    "WMT": ["walmart"],
-    "UNH": ["unitedhealth", "united health"],
-    "HON": ["honeywell"],
-    "IBM": ["ibm", "international business machines"],
-    "INTC": ["intel"],
-    "VZ": ["verizon"],
-    "AXP": ["american express", "amex"],
-    "TRV": ["travelers companies"],
+    # ── Mega-cap tech ──────────────────────────────────────────────────────────
+    "AAPL":  ["apple", "iphone", "tim cook", "app store"],
+    "MSFT":  ["microsoft", "azure", "satya nadella", "windows", "copilot"],
+    "GOOGL": ["google", "alphabet", "android", "sundar pichai", "youtube", "gemini"],
+    "AMZN":  ["amazon", "aws", "andy jassy", "prime"],
+    "NVDA":  ["nvidia", "jensen huang", "cuda", "h100", "blackwell"],
+    "META":  ["meta", "facebook", "instagram", "zuckerberg", "whatsapp", "threads"],
+    "TSLA":  ["tesla", "elon musk", "cybertruck", "model 3", "model y", "model s"],
+    "NFLX":  ["netflix", "reed hastings", "streaming"],
+    "AMD":   ["amd", "advanced micro devices", "lisa su", "ryzen", "epyc"],
+    "ORCL":  ["oracle", "larry ellison", "cloud infrastructure"],
+    "ADBE":  ["adobe", "photoshop", "creative cloud", "firefly"],
+    "CRM":   ["salesforce", "marc benioff", "slack"],
+    "NOW":   ["servicenow", "service now"],
+    "UBER":  ["uber", "dara khosrowshahi", "uber eats"],
+    "AVGO":  ["broadcom", "hock tan"],
+    "QCOM":  ["qualcomm", "snapdragon"],
+    "TXN":   ["texas instruments"],
+    "CSCO":  ["cisco"],
+    "IBM":   ["ibm", "international business machines", "watsonx"],
+    "INTC":  ["intel", "pat gelsinger", "foundry"],
+    # ── Financials ─────────────────────────────────────────────────────────────
+    "JPM":   ["jpmorgan", "jp morgan", "jamie dimon"],
+    "BAC":   ["bank of america", "bofa"],
+    "GS":    ["goldman sachs", "goldman"],
+    "V":     ["visa"],
+    "MA":    ["mastercard"],
+    "AXP":   ["american express", "amex"],
+    "MS":    ["morgan stanley"],
+    "C":     ["citigroup", "citibank", "citi group"],
+    "WFC":   ["wells fargo"],
+    "BLK":   ["blackrock", "larry fink", "aladdin"],
+    "SCHW":  ["charles schwab", "schwab"],
+    "TRV":   ["travelers companies", "travelers insurance"],
+    "CB":    ["chubb"],
+    "AFL":   ["aflac"],
+    "ALL":   ["allstate"],
+    "MET":   ["metlife"],
+    # ── Healthcare / Biotech ───────────────────────────────────────────────────
+    "JNJ":   ["johnson & johnson", "johnson and johnson", "j&j"],
+    "MRK":   ["merck", "keytruda"],
+    "UNH":   ["unitedhealth", "united health", "optum"],
+    "LLY":   ["eli lilly", "lilly", "mounjaro", "tirzepatide", "zepbound"],
+    "ABBV":  ["abbvie", "humira", "skyrizi", "rinvoq"],
+    "AMGN":  ["amgen", "repatha"],
+    "GILD":  ["gilead", "gilead sciences", "biktarvy"],
+    "VRTX":  ["vertex pharmaceuticals", "vertex pharma", "trikafta"],
+    "BMY":   ["bristol myers squibb", "bristol-myers", "opdivo"],
+    "MCK":   ["mckesson"],
+    "COR":   ["cencora", "amerisourcebergen"],
+    "CAH":   ["cardinal health"],
+    "CI":    ["cigna"],
+    "ELV":   ["elevance", "elevance health", "anthem blue cross"],
+    # ── Consumer ───────────────────────────────────────────────────────────────
+    "HD":    ["home depot"],
+    "MCD":   ["mcdonald", "mcdonald's", "big mac"],
+    "KO":    ["coca-cola", "coca cola", "coke"],
+    "PG":    ["procter & gamble", "procter and gamble", "p&g"],
+    "WMT":   ["walmart"],
+    "NKE":   ["nike"],
+    "DIS":   ["disney", "walt disney", "espn", "disney+"],
+    "COST":  ["costco"],
+    "CMG":   ["chipotle"],
+    "LULU":  ["lululemon"],
+    "AZO":   ["autozone"],
+    "ORLY":  ["o'reilly automotive", "oreilly automotive", "o'reilly auto"],
+    "CASY":  ["casey's general", "caseys general"],
+    "TXRH":  ["texas roadhouse"],
+    "MUSA":  ["murphy usa"],
+    "DECK":  ["deckers", "hoka", "ugg"],
+    "WSM":   ["williams-sonoma", "williams sonoma", "pottery barn"],
+    # ── Energy ─────────────────────────────────────────────────────────────────
+    "CVX":   ["chevron"],
+    "XOM":   ["exxon", "exxonmobil"],
+    "COP":   ["conocophillips", "conoco phillips"],
+    "EOG":   ["eog resources"],
+    # ── Industrials ────────────────────────────────────────────────────────────
+    "CAT":   ["caterpillar"],
+    "HON":   ["honeywell"],
+    "GE":    ["general electric", "ge aerospace", "ge vernova"],
+    "BA":    ["boeing", "737 max", "starliner"],
+    "RTX":   ["raytheon", "rtx", "pratt & whitney", "collins aerospace"],
+    "LMT":   ["lockheed martin", "f-35"],
+    "DE":    ["deere", "john deere"],
+    "VZ":    ["verizon"],
+    "GWW":   ["w.w. grainger", "ww grainger", "grainger"],
+    "FAST":  ["fastenal"],
+    "WSO":   ["watsco"],
+    "EME":   ["emcor"],
+    "FIX":   ["comfort systems"],
+    "LECO":  ["lincoln electric"],
+    "DHI":   ["d.r. horton", "dr horton"],
+    "LEN":   ["lennar"],
+    "PHM":   ["pultegroup", "pulte group", "pulte homes"],
+    "TOL":   ["toll brothers"],
+    # ── Semiconductors ─────────────────────────────────────────────────────────
+    "KLAC":  ["kla corporation", "kla"],
+    "AMAT":  ["applied materials"],
+    "LRCX":  ["lam research"],
+    "MRVL":  ["marvell technology", "marvell"],
+    "NXPI":  ["nxp semiconductors", "nxp"],
+    "MU":    ["micron"],
+    "ON":    ["on semiconductor", "onsemi"],
+    "SWKS":  ["skyworks"],
+    # ── Mid/Small cap + high-growth underfollowed ──────────────────────────────
+    "CRWD":  ["crowdstrike", "crowd strike", "falcon"],
+    "NET":   ["cloudflare"],
+    "DDOG":  ["datadog"],
+    "FTNT":  ["fortinet"],
+    "ZS":    ["zscaler"],
+    "AXON":  ["axon enterprise", "taser", "axon body camera"],
+    "MDB":   ["mongodb", "mongo db", "atlas database"],
+    "CELH":  ["celsius holdings", "celsius energy drink"],
+    "TTD":   ["trade desk", "the trade desk"],
+    "SPOT":  ["spotify"],
+    "HUBS":  ["hubspot"],
+    "SNOW":  ["snowflake"],
+    "PLTR":  ["palantir", "gotham", "foundry"],
+    "SHOP":  ["shopify", "tobi lutke"],
+    "SE":    ["sea limited", "shopee", "garena"],
+    # ── Global ADRs ────────────────────────────────────────────────────────────
+    "ASML":  ["asml", "euv lithography"],
+    "SAP":   ["sap se", "sap software"],
+    "NVO":   ["novo nordisk", "ozempic", "wegovy"],
+    "AZN":   ["astrazeneca", "astra zeneca"],
+    "GSK":   ["gsk", "glaxosmithkline", "glaxo"],
+    "SNY":   ["sanofi", "dupixent"],
+    "SHEL":  ["shell plc", "royal dutch shell"],
+    "BP":    ["bp plc", "british petroleum"],
+    "TTE":   ["totalenergies", "total energies"],
+    "UL":    ["unilever"],
+    "RIO":   ["rio tinto"],
+    "TSM":   ["tsmc", "taiwan semiconductor"],
+    "SONY":  ["sony", "playstation"],
+    "TM":    ["toyota"],
+    "BABA":  ["alibaba", "taobao", "tmall"],
+    "INFY":  ["infosys"],
+    "BHP":   ["bhp group", "bhp billiton"],
+    "MELI":  ["mercadolibre", "mercado libre"],
+    "NU":    ["nubank", "nu holdings"],
+    "VALE":  ["vale s.a.", "vale sa", "vale mining"],
 }

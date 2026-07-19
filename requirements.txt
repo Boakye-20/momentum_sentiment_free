@@ -1,4 +1,4 @@
-# Free data + analysis stack — no paid APIs required.
+# Free data + analysis stack — no paid APIs required for core functionality.
 pandas>=2.2
 numpy>=1.26
 yfinance>=0.2.40        # free price data (Yahoo Finance)
@@ -8,8 +8,17 @@ requests>=2.31          # Alpha Vantage NEWS_SENTIMENT calls
 matplotlib>=3.8         # static report charts
 pyarrow>=15.0           # parquet price cache
 
-# Dashboard (Bloomberg-style terminal UI)
+# Dashboard
 streamlit>=1.43         # web UI; run: python -m streamlit run dashboard.py
-plotly>=5.20            # interactive dark charts
+plotly>=5.20            # interactive dark charts for backtest panels
 
-pytest>=8.0             # tests (optional)
+# Scoring + extended technicals (optional but recommended)
+pandas-ta>=0.3.14b      # 130+ technical indicators from OHLCV (for AI Score MACD layer)
+python-dotenv>=1.0      # load .env for local development
+hmmlearn>=0.3           # optional: 3-state HMM regime detector (src/regime.py)
+
+# AI Chat (optional — enables the AI Copilot panel)
+openai>=1.30            # GPT-4.1 Mini chat interface
+
+# Testing
+pytest>=8.0
