@@ -107,6 +107,46 @@ export default function DataModelPage() {
         </p>
       </Section>
 
+      <Section title="How to use the signals (and how to sell)">
+        <p>
+          There is no separate SELL button, and that is on purpose. This is a{" "}
+          <strong>long-only</strong> model: it only tells you what is worth owning,
+          never to bet against a stock. AVOID does not mean &quot;short it&quot;. It
+          means &quot;this is a poor stock to own right now&quot;. Selling happens by
+          a rule, checked on a schedule, not as a labelled alert.
+        </p>
+        <p>
+          The routine that matches the backtest is a <strong>monthly review</strong>.
+          Pick one day a month and, for every stock you hold:
+        </p>
+        <div className="space-y-3 pt-1">
+          <Row term="Still a BUY?">
+            If its score is still strong and it is still near the top of the list,
+            keep holding. Winners are meant to be held while they keep working.
+          </Row>
+          <Row term="Slipped to HOLD?">
+            It is weakening. Watch it. If better-scoring stocks are available, it may
+            be the one to replace.
+          </Row>
+          <Row term="Dropped to AVOID?">
+            The model no longer supports owning it (momentum gone, trend broken, or
+            fundamentals and news turned against it). This is your exit signal: close
+            the position.
+          </Row>
+          <Row term="Fill the gaps">
+            Put the money from anything you sold into the current highest-scoring
+            BUYs you do not already own.
+          </Row>
+        </div>
+        <p>
+          The roughly 30-day holding period you see in the backtest is not a fixed
+          rule. It is simply a result of reviewing monthly: the shortest a position
+          can last is one month, and a strong stock is held for as many months as it
+          keeps qualifying. There is also no &quot;stop trading it&quot; list. A stock
+          you sell can be bought back later if it earns its way back onto the list.
+        </p>
+      </Section>
+
       <Section title="News sentiment, explained">
         <p>
           Every day the system collects headlines about each stock from free news

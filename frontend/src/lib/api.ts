@@ -106,6 +106,31 @@ export interface WalkForwardFold {
   out_bench: number;
 }
 
+export interface DurationBucket {
+  label: string;
+  n: number;
+  win_rate_pct: number;
+  avg_return_pct: number;
+}
+
+export interface DurationAnalytics {
+  duration_buckets: DurationBucket[];
+  time_to_peak: {
+    avg_days_to_peak: number;
+    median_days_to_peak: number;
+    avg_hold_days_winners: number;
+    avg_mfe_pct: number;
+  };
+  drawdown_duration: {
+    longest_recovery_days: number;
+    avg_recovery_days: number;
+    n_drawdowns: number;
+    currently_underwater_days: number;
+  };
+  // [hold_days, return_pct] for every trade; drives the interactive slider.
+  hold_returns: [number, number][];
+}
+
 export interface BacktestResponse {
   status: "running" | "done" | "error";
   message?: string;
@@ -114,6 +139,7 @@ export interface BacktestResponse {
   metrics?: BacktestMetrics;
   equity?: { dates: string[]; strategy: number[]; benchmark: number[] };
   walk_forward?: WalkForwardFold[];
+  duration?: DurationAnalytics;
   trades?: BacktestTrade[];
 }
 

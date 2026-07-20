@@ -321,6 +321,7 @@ def _run_backtest_job(key: str, use_sentiment: bool) -> None:
                 "benchmark": [round(float(v), 2) for v in bm],
             },
             "walk_forward": res.walk_forward,
+            "duration": res.duration,
             "trades": [
                 {k: _clean(v) for k, v in row.items()}
                 for row in trades.to_dict("records")

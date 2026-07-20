@@ -3,6 +3,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import type { ApexOptions } from "apexcharts";
 import { fetchBacktest, BacktestResponse } from "@/lib/api";
+import DurationExplorer from "@/components/backtest/DurationExplorer";
 
 const ReactApexChart = dynamic(() => import("react-apexcharts"), { ssr: false });
 
@@ -196,6 +197,59 @@ export default function BacktestPage() {
                   </tbody>
                 </table>
               </div>
+            </div>
+          )}
+
+          {data.duration && (
+            <div className="rounded-xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-white/[0.03]">
+              <div className="border-b border-gray-100 p-4 dark:border-gray-800">
+                <h2 className="text-sm font-semibold text-gray-900 dark:text-white/90">
+                  Trade duration analytics
+                </h2>
+                <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                  How time affects this strategy: when trades win, how fast they
+                  peak, and how long the portfolio stays underwater.
+                </p>
+              </div>
+
+              <DurationExplorer pairs={data.duration.hold_returns} />
+
+              <div className="grid grid-cols-2 gap-4 border-t border-gray-100 p-4 dark:border-gray-800 md:grid-cols-4">
+                <Stat
+                  label="Winners peak at"
+                  value={`${data.duration.time_to_peak.avg_days_to_peak} days`}
+                  good={null}
+                />
+                <Stat
+                  label="But held for"
+                  value={`${data.duration.time_to_peak.avg_hold_days_winners} days`}
+                  good={null}
+                />
+                <Stat
+                  label="Best unrealised gain"
+                  value={`${data.duration.time_to_peak.avg_mfe_pct}%`}
+                  good={null}
+                />
+                <Stat
+                  label="Longest recovery"
+                  value={`${data.duration.drawdown_duration.longest_recovery_days} days`}
+                  good={null}
+                />
+              </div>
+              <p className="px-4 pb-4 text-xs text-gray-500 dark:text-gray-400">
+                Winners reach their best profit around day{" "}
+                {data.duration.time_to_peak.avg_days_to_peak} but are held about{" "}
+                {data.duration.time_to_peak.avg_hold_days_winners} days, so some gain
+                decays before exit. The worst the whole portfolio ever stayed below a
+                previous high was{" "}
+                {data.duration.drawdown_duration.longest_recovery_days} days (about{" "}
+                {Math.round(data.duration.drawdown_duration.longest_recovery_days / 30)}{" "}
+                months), across {data.duration.drawdown_duration.n_drawdowns} dips
+                averaging {data.duration.drawdown_duration.avg_recovery_days} days each.
+                {data.duration.drawdown_duration.currently_underwater_days > 0
+                  ? ` Currently ${data.duration.drawdown_duration.currently_underwater_days} days below the last peak.`
+                  : " Currently at or near a fresh high."}
+              </p>
             </div>
           )}
 

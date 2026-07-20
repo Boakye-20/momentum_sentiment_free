@@ -28,6 +28,7 @@ class BacktestResult:
     trades: pd.DataFrame
     metrics: dict
     walk_forward: list = field(default_factory=list)
+    duration: dict = field(default_factory=dict)
 
 
 def _rebalance_dates(index: pd.DatetimeIndex) -> pd.DatetimeIndex:
@@ -51,7 +52,13 @@ def _build_target_weights(prices, panels, sent_panel, use_sentiment) -> pd.DataF
 
 
 def _trades_from_weights(eff: pd.DataFrame, prices: pd.DataFrame) -> pd.DataFrame:
-    """Reconstruct discrete holding spells (entry->exit) for honest trade stats."""
+    """Reconstruct discrete holding spells (entry->exit) for honest trade stats.
+
+    Also records the Maximum Favorable Excursion (best unrealised profit during
+    the hold) and how many days it took to reach it — the raw material for the
+    time-to-peak analytics. `days_to_peak` far below `hold_days` on winners
+    means the exit is slow and profit is decaying before the position closes.
+    """
     recs = []
     for t in eff.columns:
         w = eff[t]
@@ -67,14 +74,84 @@ def _trades_from_weights(eff: pd.DataFrame, prices: pd.DataFrame) -> pd.DataFram
             direction = "LONG" if w.loc[ed] > 0 else "SHORT"
             ep, xp = prices.loc[ed, t], prices.loc[xd, t]
             ret = (xp / ep - 1) * (1 if direction == "LONG" else -1)
+
+            # Max favorable excursion + day it was reached.
+            path = prices.loc[ed:xd, t].dropna()
+            if path.empty:
+                fav_date, mfe = ed, 0.0
+            elif direction == "LONG":
+                fav_date, mfe = path.idxmax(), (path.max() / ep - 1) * 100
+            else:
+                fav_date, mfe = path.idxmin(), (ep / path.min() - 1) * 100
+
             recs.append({"ticker": t, "direction": direction,
                          "entry_date": ed.date(), "exit_date": xd.date(),
                          "entry_price": round(float(ep), 2), "exit_price": round(float(xp), 2),
                          "return_pct": round(float(ret) * 100, 2),
-                         "hold_days": int((xd - ed).days)})
+                         "hold_days": int((xd - ed).days),
+                         "days_to_peak": int((fav_date - ed).days),
+                         "mfe_pct": round(float(mfe), 2)})
     cols = ["ticker", "direction", "entry_date", "exit_date",
-            "entry_price", "exit_price", "return_pct", "hold_days"]
+            "entry_price", "exit_price", "return_pct", "hold_days",
+            "days_to_peak", "mfe_pct"]
     return pd.DataFrame(recs, columns=cols).sort_values("entry_date").reset_index(drop=True)
+
+
+def _duration_analytics(trades: pd.DataFrame, equity: pd.Series) -> dict:
+    """Time-based views of the strategy: win rate by how long trades were held,
+    how quickly winners reach peak profit, and how long the whole portfolio
+    stays underwater before making a new high (the 'am I stuck for years?'
+    question). Pure post-processing of the trade log + equity curve."""
+    # 1. Win rate + average return, bucketed by holding duration.
+    bands = [("0-10 days", 0, 10), ("11-30 days", 11, 30),
+             ("31-60 days", 31, 60), ("60+ days", 61, 10**9)]
+    buckets = []
+    for label, lo, hi in bands:
+        sub = trades[(trades["hold_days"] >= lo) & (trades["hold_days"] <= hi)]
+        n = len(sub)
+        buckets.append({
+            "label": label,
+            "n": int(n),
+            "win_rate_pct": round(float((sub["return_pct"] > 0).mean() * 100), 1) if n else 0.0,
+            "avg_return_pct": round(float(sub["return_pct"].mean()), 2) if n else 0.0,
+        })
+
+    # 2. Time to peak profit, across winning trades only.
+    winners = trades[trades["return_pct"] > 0]
+    time_to_peak = {
+        "avg_days_to_peak": round(float(winners["days_to_peak"].mean()), 1) if len(winners) else 0.0,
+        "median_days_to_peak": int(winners["days_to_peak"].median()) if len(winners) else 0,
+        "avg_hold_days_winners": round(float(winners["hold_days"].mean()), 1) if len(winners) else 0.0,
+        "avg_mfe_pct": round(float(winners["mfe_pct"].mean()), 2) if len(winners) else 0.0,
+    }
+
+    # 3. Drawdown DURATION: how long equity stays below its prior peak.
+    peak = equity.cummax()
+    underwater = (equity < peak).values
+    idx = equity.index
+    runs, in_run, peak_date = [], False, idx[0]
+    for i in range(len(equity)):
+        if underwater[i] and not in_run:
+            in_run, peak_date = True, idx[i - 1] if i > 0 else idx[i]
+        elif not underwater[i] and in_run:
+            in_run = False
+            runs.append(int((idx[i] - peak_date).days))
+    current_underwater = int((idx[-1] - peak_date).days) if in_run else 0
+    drawdown_duration = {
+        "longest_recovery_days": max(runs) if runs else 0,
+        "avg_recovery_days": round(float(np.mean(runs)), 1) if runs else 0.0,
+        "n_drawdowns": len(runs),
+        "currently_underwater_days": current_underwater,
+    }
+
+    # Raw (hold_days, return_pct) for every trade, so the UI can recompute
+    # win rate / avg return for any custom holding window on a slider.
+    hold_returns = [[int(h), round(float(r), 2)]
+                    for h, r in zip(trades["hold_days"], trades["return_pct"])]
+
+    return {"duration_buckets": buckets, "time_to_peak": time_to_peak,
+            "drawdown_duration": drawdown_duration,
+            "hold_returns": hold_returns}
 
 
 def _metrics(equity, benchmark, daily, trades) -> dict:
@@ -192,9 +269,11 @@ def run_backtest(prices: pd.DataFrame, benchmark: pd.Series,
 
     trades = _trades_from_weights(eff.loc[live:], prices.loc[live:])
     metrics = _metrics(equity, bench, net, trades)
+    duration = _duration_analytics(trades, equity)
     wf = _walk_forward(equity, bench)
 
     print(f"[backtest] done. final equity £{equity.iloc[-1]:,.0f} "
           f"| CAGR {metrics['cagr_pct']}% vs bench {metrics['benchmark_cagr_pct']}% "
           f"| Sharpe {metrics['sharpe']} | {metrics['n_trades']} trades")
-    return BacktestResult(equity, bench, net, eff.loc[live:], trades, metrics, wf)
+    return BacktestResult(equity, bench, net, eff.loc[live:], trades, metrics,
+                          wf, duration)

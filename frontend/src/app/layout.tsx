@@ -27,8 +27,15 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
-      <body className={`${inter.className} dark:bg-gray-900`}>
+    // suppressHydrationWarning: the ThemeProvider toggles the `dark` class on
+    // <html> on the client, and browser extensions inject attributes into
+    // <html>/<body> before React hydrates. Both are intended/unavoidable
+    // root-element differences, so we tell React not to warn about them.
+    <html lang="en" suppressHydrationWarning>
+      <body
+        className={`${inter.className} dark:bg-gray-900`}
+        suppressHydrationWarning
+      >
         <ThemeProvider>
           <SidebarProvider>{children}</SidebarProvider>
         </ThemeProvider>
