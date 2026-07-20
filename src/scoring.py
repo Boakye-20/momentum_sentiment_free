@@ -24,9 +24,14 @@ Outputs per ticker:
   value_score     valuation-only lens, 0–10 (NaN if no inputs) — NOT part
                   of the ai_score blend (fundamentals already include P/E);
                   a sort/filter axis for "quality that's also cheap"
-  under_radar     True when fundamentals are strong, valuation is cheap and
-                  news sentiment is quiet/negative — the classic
-                  "good company, nobody excited" rerating setup
+  under_radar     True when fundamentals are strong, valuation is cheap,
+                  news sentiment is quiet/negative AND the company is not a
+                  mega-cap — the classic "good company, nobody excited"
+                  rerating setup. The size cap matters: neutral sentiment
+                  tone on a $1T name means positives/negatives netting out
+                  under heavy coverage, not low attention (META once
+                  qualified on tone alone, which is nonsense for a
+                  mega-cap)
   rank_pct        percentile rank of ai_score across the universe (0–100)
   confidence_pct  share of the total blend weight backed by real data
 """
@@ -37,6 +42,7 @@ import pandas as pd
 
 W_TECH, W_SENT, W_FUND = 0.45, 0.25, 0.30
 BUY_MIN, HOLD_MIN = 6.5, 3.5
+UNDER_RADAR_MAX_MCAP = 2.0e11   # $200B — above this, "under the radar" is a misnomer
 
 
 def _norm(series: pd.Series) -> pd.Series:
@@ -202,6 +208,14 @@ def compute_ai_score(signals_df: pd.DataFrame) -> pd.DataFrame:
             & (df["value_score"] >= 6.0)
             & (df["sent_score"].fillna(5.0) <= 5.5)
         )
+        # Mega-caps are never "under the radar": their neutral sentiment is
+        # heavy coverage netting out, not absence of attention. Missing
+        # market cap passes (unknown size is usually small, not huge).
+        if "market_cap" in df.columns:
+            df["under_radar"] &= (
+                pd.to_numeric(df["market_cap"], errors="coerce").fillna(0)
+                < UNDER_RADAR_MAX_MCAP
+            )
     else:
         df["under_radar"] = False
 

@@ -7,7 +7,7 @@ import type { ApexOptions } from "apexcharts";
 import Badge from "@/components/ui/badge/Badge";
 import ScoreBar from "@/components/screener/ScoreBar";
 import RadarTag from "@/components/screener/RadarTag";
-import { fetchStock, fmtPct, fmtNum, StockDetail } from "@/lib/api";
+import { fetchStock, fmtPct, fmtNum, sleeveLabel, StockDetail } from "@/lib/api";
 
 const ReactApexChart = dynamic(() => import("react-apexcharts"), { ssr: false });
 
@@ -61,10 +61,15 @@ export default function StockPage() {
         <h1 className="text-2xl font-bold text-gray-800 dark:text-white/90">
           {d.ticker}
         </h1>
+        {d.name && (
+          <span className="text-lg text-gray-500 dark:text-gray-400">
+            {d.name}
+          </span>
+        )}
         <Badge color={badgeColor}>{d.action}</Badge>
         {d.under_radar ? <RadarTag /> : null}
         <span className="text-sm text-gray-500 dark:text-gray-400">
-          {String(d.sector)} · {String(d.sleeve)} · as of {d.as_of}
+          {String(d.sector)} · {sleeveLabel(String(d.sleeve))} · as of {d.as_of}
         </span>
       </div>
 

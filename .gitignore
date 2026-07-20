@@ -15,3 +15,6 @@ outputs/*.log
 .claude/scheduled_tasks.lock
 .DS_Store
 .pytest_cache/
+
+# local runtime logs
+api-server.log

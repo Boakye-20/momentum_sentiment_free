@@ -25,7 +25,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
-from config import CFG, SECTORS, TICKER_SLEEVE  # noqa: E402
+from config import CFG, SECTORS, TICKER_SLEEVE, TICKER_NAMES  # noqa: E402
 from src import data as data_mod
 from src import momentum, signals
 from src import sentiment as sent_mod
@@ -68,62 +68,6 @@ P_DANGER  = DANGER
 P_GRID    = "#F1F5F9"
 P_LINE    = "#E8ECF4"
 
-# Human-readable ticker names for cards
-TICKER_NAMES: dict[str, str] = {
-    "AAPL": "Apple Inc.", "MSFT": "Microsoft", "GOOGL": "Alphabet",
-    "AMZN": "Amazon", "NVDA": "NVIDIA", "META": "Meta Platforms",
-    "TSLA": "Tesla", "NFLX": "Netflix", "AMD": "AMD",
-    "ORCL": "Oracle", "ADBE": "Adobe", "CRM": "Salesforce",
-    "NOW": "ServiceNow", "UBER": "Uber", "AVGO": "Broadcom",
-    "QCOM": "Qualcomm", "TXN": "Texas Instruments", "CSCO": "Cisco",
-    "IBM": "IBM", "INTC": "Intel",
-    "JPM": "JPMorgan", "BAC": "Bank of America", "GS": "Goldman Sachs",
-    "V": "Visa", "MA": "Mastercard", "AXP": "Amex",
-    "MS": "Morgan Stanley", "C": "Citigroup", "WFC": "Wells Fargo",
-    "BLK": "BlackRock", "SCHW": "Schwab", "SPGI": "S&P Global", "TRV": "Travelers",
-    "JNJ": "J&J", "MRK": "Merck", "UNH": "UnitedHealth",
-    "LLY": "Eli Lilly", "ABBV": "AbbVie", "PFE": "Pfizer",
-    "AMGN": "Amgen", "GILD": "Gilead", "REGN": "Regeneron",
-    "VRTX": "Vertex", "BMY": "Bristol Myers", "TMO": "Thermo Fisher",
-    "ISRG": "Intuitive Surgical",
-    "HD": "Home Depot", "MCD": "McDonald's", "KO": "Coca-Cola",
-    "PG": "P&G", "WMT": "Walmart", "NKE": "Nike", "DIS": "Disney",
-    "COST": "Costco", "TGT": "Target", "SBUX": "Starbucks",
-    "CMG": "Chipotle", "LULU": "Lululemon",
-    "CVX": "Chevron", "XOM": "ExxonMobil", "COP": "ConocoPhillips",
-    "SLB": "SLB", "EOG": "EOG Resources", "OXY": "Occidental",
-    "CAT": "Caterpillar", "HON": "Honeywell", "GE": "GE Aerospace",
-    "BA": "Boeing", "RTX": "RTX Corp", "LMT": "Lockheed Martin",
-    "DE": "John Deere", "FDX": "FedEx", "UPS": "UPS", "VZ": "Verizon",
-    "KLAC": "KLA Corp", "AMAT": "Applied Materials", "LRCX": "Lam Research",
-    "MRVL": "Marvell", "NXPI": "NXP Semiconductors",
-    "CRWD": "CrowdStrike", "NET": "Cloudflare", "DDOG": "Datadog",
-    "FTNT": "Fortinet", "ZS": "Zscaler", "AXON": "Axon Enterprise",
-    "MDB": "MongoDB", "CELH": "Celsius Holdings", "TTD": "Trade Desk",
-    "ROKU": "Roku", "SPOT": "Spotify", "PINS": "Pinterest",
-    "ENPH": "Enphase Energy", "RBLX": "Roblox", "ETSY": "Etsy",
-    "HUBS": "HubSpot", "SNOW": "Snowflake", "PLTR": "Palantir",
-    "COIN": "Coinbase", "SHOP": "Shopify", "SE": "Sea Limited",
-    # Quality / value sleeve
-    "MCK": "McKesson", "COR": "Cencora", "CAH": "Cardinal Health",
-    "CI": "Cigna", "ELV": "Elevance Health",
-    "CB": "Chubb", "AFL": "Aflac", "ALL": "Allstate", "MET": "MetLife",
-    "AZO": "AutoZone", "ORLY": "O'Reilly Auto", "CASY": "Casey's",
-    "TXRH": "Texas Roadhouse", "MUSA": "Murphy USA",
-    "GWW": "Grainger", "FAST": "Fastenal", "WSO": "Watsco",
-    "EME": "EMCOR Group", "FIX": "Comfort Systems", "LECO": "Lincoln Electric",
-    "MU": "Micron", "ON": "onsemi", "SWKS": "Skyworks",
-    "DHI": "D.R. Horton", "LEN": "Lennar", "PHM": "PulteGroup",
-    "TOL": "Toll Brothers", "DECK": "Deckers", "WSM": "Williams-Sonoma",
-    # Global ADRs
-    "ASML": "ASML Holding", "SAP": "SAP SE", "NVO": "Novo Nordisk",
-    "AZN": "AstraZeneca", "GSK": "GSK plc", "SNY": "Sanofi",
-    "SHEL": "Shell", "BP": "BP plc", "TTE": "TotalEnergies",
-    "UL": "Unilever", "RIO": "Rio Tinto",
-    "TSM": "TSMC", "SONY": "Sony", "TM": "Toyota", "BABA": "Alibaba",
-    "INFY": "Infosys", "BHP": "BHP Group",
-    "MELI": "MercadoLibre", "NU": "Nu Holdings", "VALE": "Vale",
-}
 
 
 # ── Page config ───────────────────────────────────────────────────────────────

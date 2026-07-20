@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useSidebar } from "../context/SidebarContext";
 import {
+  BoltIcon,
   ChevronDownIcon,
   GridIcon,
   HorizontaLDots,
@@ -28,6 +29,11 @@ const navItems: NavItem[] = [
     icon: <PieChartIcon />,
     name: "Portfolio",
     path: "/portfolio",
+  },
+  {
+    icon: <BoltIcon />,
+    name: "Backtest",
+    path: "/backtest",
   },
   {
     icon: <UserCircleIcon />,

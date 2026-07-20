@@ -14,10 +14,12 @@ from __future__ import annotations
 import base64
 import math
 import os
+import re
+import threading
 import time
 from pathlib import Path
 
-# Load .env before reading any keys (T212_*, ALPHAVANTAGE_*, …)
+# Load .env before reading any keys (T212_*, ALPHAVANTAGE_*, OPENAI_*, …)
 try:
     from dotenv import load_dotenv
     load_dotenv()
@@ -28,8 +30,9 @@ import numpy as np
 import pandas as pd
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 
-from config import CFG, SECTORS, TICKER_SLEEVE
+from config import CFG, SECTORS, TICKER_SLEEVE, TICKER_NAMES
 from src import momentum
 from src.data import load_prices
 from src.scoring import compute_ai_score
@@ -44,7 +47,7 @@ app = FastAPI(title="Momentum+Sentiment API")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
-    allow_methods=["GET"],
+    allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
 
@@ -117,6 +120,7 @@ def _build_screener() -> tuple[pd.DataFrame, pd.DataFrame]:
     for t in px.columns:
         rows.append({
             "ticker": t,
+            "name": TICKER_NAMES.get(t, t),
             "sector": SECTORS.get(t, "Other"),
             "sleeve": TICKER_SLEEVE.get(t, "core"),
             "last_price": float(px[t].iloc[-1]),
@@ -191,6 +195,39 @@ def stock(ticker: str):
     return row
 
 
+# Trading212 rate-limits /equity/positions to 1 request/second. The dev
+# frontend fires the fetch twice on mount (React StrictMode), so the second
+# call gets rate-limited and 502s. A short cache + one retry absorbs both.
+_T212_TTL = 20
+_t212_cache: dict = {}
+
+
+def _fetch_t212_positions(host: str, auth: str) -> list:
+    now = time.time()
+    cached = _t212_cache.get("positions")
+    if cached is not None and now - _t212_cache.get("ts", 0) < _T212_TTL:
+        return cached
+    import urllib.request, json
+    req = urllib.request.Request(
+        f"https://{host}.trading212.com/api/v0/equity/positions",
+        headers={"Authorization": auth},
+    )
+    last_err = None
+    for attempt in range(2):
+        try:
+            with urllib.request.urlopen(req, timeout=15) as r:
+                positions = json.load(r)
+            _t212_cache.update(positions=positions, ts=time.time())
+            return positions
+        except Exception as e:
+            last_err = e
+            if attempt == 0:
+                time.sleep(1.2)   # respect the 1 req/sec limit, then retry once
+    if cached is not None:        # live call failed but we have a recent copy
+        return cached
+    raise HTTPException(502, f"Trading212 request failed: {last_err}")
+
+
 @app.get("/api/portfolio")
 def portfolio():
     """Trading212 open positions joined against AI Scores (read-only)."""
@@ -209,16 +246,8 @@ def portfolio():
         auth = f"Basic {token}"
     else:
         auth = key  # legacy single-key header
-    import urllib.request, json
-    req = urllib.request.Request(
-        f"https://{host}.trading212.com/api/v0/equity/positions",
-        headers={"Authorization": auth},
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=15) as r:
-            positions = json.load(r)
-    except Exception as e:
-        raise HTTPException(502, f"Trading212 request failed: {e}")
+
+    positions = _fetch_t212_positions(host, auth)
 
     df, as_of = _screener_df()
     out = []
@@ -251,3 +280,221 @@ def meta():
         "avoid": int((df["action"] == "AVOID").sum()),
         "avg_score": round(float(df["ai_score"].mean()), 2),
     }
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Backtest — runs the real vector backtest (src/backtest.py) on the cached
+# price history. A full run takes ~30-60s, far too long for one HTTP
+# round-trip through the Next.js proxy, so it computes in a background
+# thread and the frontend polls: first call returns {"status": "running"},
+# later calls return the finished payload (cached for an hour per variant).
+# ──────────────────────────────────────────────────────────────────────────
+_BT_TTL = 60 * 60
+_bt_lock = threading.Lock()
+_bt_jobs: dict = {}   # "sent=True/False" -> {"status", "ts", "result"|"message"}
+
+
+def _run_backtest_job(key: str, use_sentiment: bool) -> None:
+    try:
+        from src.backtest import run_backtest
+        from src.data import split_universe_benchmark
+        px = _load_px()
+        uni, bench = split_universe_benchmark(px)
+        if bench is None:
+            raise RuntimeError("Benchmark (SPY) missing from the price cache.")
+        res = run_backtest(uni, bench, use_sentiment=use_sentiment)
+
+        eq = res.equity.resample("W-FRI").last().dropna()
+        bm = (res.benchmark.resample("W-FRI").last()
+              .reindex(eq.index).ffill())
+        trades = res.trades.tail(25).copy()
+        trades["entry_date"] = trades["entry_date"].astype(str)
+        trades["exit_date"] = trades["exit_date"].astype(str)
+
+        result = {
+            "as_of": str(px.index[-1].date()),
+            "use_sentiment": use_sentiment,
+            "metrics": {k: _clean(v) for k, v in res.metrics.items()},
+            "equity": {
+                "dates": [str(d.date()) for d in eq.index],
+                "strategy": [round(float(v), 2) for v in eq],
+                "benchmark": [round(float(v), 2) for v in bm],
+            },
+            "walk_forward": res.walk_forward,
+            "trades": [
+                {k: _clean(v) for k, v in row.items()}
+                for row in trades.to_dict("records")
+            ],
+        }
+        with _bt_lock:
+            _bt_jobs[key] = {"status": "done", "ts": time.time(),
+                             "result": result}
+    except Exception as e:
+        with _bt_lock:
+            _bt_jobs[key] = {"status": "error", "ts": time.time(),
+                             "message": str(e)}
+
+
+@app.get("/api/backtest")
+def backtest(sentiment: bool = False):
+    key = f"sent={sentiment}"
+    with _bt_lock:
+        job = _bt_jobs.get(key)
+        if job:
+            if job["status"] == "done" and time.time() - job["ts"] < _BT_TTL:
+                return {"status": "done", **job["result"]}
+            if job["status"] == "running":
+                return {"status": "running"}
+            if job["status"] == "error":
+                # report once, then allow a retry on the next call
+                _bt_jobs.pop(key, None)
+                return {"status": "error", "message": job.get("message", "")}
+        _bt_jobs[key] = {"status": "running", "ts": time.time()}
+    threading.Thread(target=_run_backtest_job, args=(key, sentiment),
+                     daemon=True).start()
+    return {"status": "running"}
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# AI Copilot — GPT-4.1 Mini, grounded strictly in this app's own data
+# (screener scores, Yahoo Finance fundamentals, Alpha Vantage + free
+# sentiment history). Ported from the Streamlit dashboard's copilot panel.
+# ──────────────────────────────────────────────────────────────────────────
+class ChatMessage(BaseModel):
+    role: str
+    content: str
+
+
+class CopilotRequest(BaseModel):
+    messages: list[ChatMessage]
+
+
+_COPILOT_CTX_COLS = [
+    "sector", "sleeve", "ai_score", "action", "tech_score", "sent_score",
+    "fund_score", "value_score", "under_radar", "last_price", "mom_12m",
+    "rsi", "sentiment_score", "pe_forward", "roe",
+]
+
+
+def _ticker_deep_dive(ticker: str, df: pd.DataFrame) -> str:
+    """Full Yahoo Finance fundamentals + Alpha Vantage/free sentiment
+    history for one ticker, for when a question names it specifically.
+
+    Repeats the screener/scoring fields as explicit "key: value" lines
+    (not just relying on the big whitespace-aligned table) because GPT-4.1
+    Mini was unreliable at reading a single cell out of a 130+ row, 15
+    column fixed-width dump — e.g. it misread META's under_radar=True as
+    False even though the raw table text was correct. One-ticker-at-a-time
+    key: value pairs are far more reliable for the model to quote exactly.
+    """
+    if ticker not in df.index:
+        return ""
+    row = df.loc[ticker]
+    lines = [f"\n--- DETAILED DATA FOR {ticker} ({row.get('sector', '?')}, "
+             f"{row.get('sleeve', '?')} sleeve) ---",
+             "This is the authoritative data for this ticker; prefer it "
+             "over the summary table above for any of these fields."]
+
+    score_cols = ["ai_score", "action", "tech_score", "sent_score",
+                  "fund_score", "value_score", "under_radar", "last_price",
+                  "mom_12m", "rsi", "sentiment_score"]
+    score_present = {c: row[c] for c in score_cols if c in df.columns and pd.notna(row.get(c))}
+    if score_present:
+        lines.append("Scoring: " +
+                     ", ".join(f"{k}={v}" for k, v in score_present.items()))
+
+    fund_cols = ["pe_forward", "pe_trailing", "ps_ratio", "price_to_book",
+                 "ev_ebitda", "roe", "roa", "debt_equity", "gross_margin",
+                 "operating_margin", "profit_margin", "revenue_growth",
+                 "peg_ratio", "dividend_yield", "market_cap", "beta"]
+    fund_present = {c: row[c] for c in fund_cols if c in df.columns and pd.notna(row.get(c))}
+    if fund_present:
+        lines.append("Yahoo Finance fundamentals: " +
+                     ", ".join(f"{k}={v:.4g}" for k, v in fund_present.items()))
+
+    try:
+        p = Path(CFG.paths.sentiment_log)
+        if p.exists():
+            hist = pd.read_csv(p, parse_dates=["date"])
+            tick_hist = (hist[hist.ticker == ticker]
+                        .sort_values("date", ascending=False).head(10))
+            if not tick_hist.empty:
+                lines.append("Recent sentiment history (Alpha Vantage historical + "
+                             "free daily snapshots, newest first):")
+                for _, r in tick_hist.iterrows():
+                    lines.append(
+                        f"  {r['date'].date()}: score={r['score']:.3f} "
+                        f"label={r['label']} n_headlines={int(r['n_headlines'])} "
+                        f"source={r['source']}"
+                    )
+            else:
+                lines.append("No logged sentiment history yet for this ticker "
+                             "(Alpha Vantage backfill for its sleeve may still be "
+                             "in progress).")
+    except Exception:
+        pass
+    return "\n".join(lines)
+
+
+def _mentioned_tickers(text: str, universe: list[str], limit: int = 5) -> list[str]:
+    words = set(re.findall(r"[A-Za-z]{2,6}", text.upper()))
+    return [t for t in universe if t in words][:limit]
+
+
+@app.post("/api/copilot")
+def copilot(req: CopilotRequest):
+    key = os.environ.get("OPENAI_API_KEY", "").strip()
+    if key.startswith("your_"):
+        key = ""
+    if not key:
+        return {"reply": None,
+                "message": "Set OPENAI_API_KEY in .env to enable the AI Copilot."}
+    try:
+        from openai import OpenAI
+    except ImportError:
+        return {"reply": None,
+                "message": "Run: pip install openai (in the backend environment)."}
+
+    df, as_of = _screener_df()
+    ctx_df = df[[c for c in _COPILOT_CTX_COLS if c in df.columns]]
+    data_ctx = ctx_df.to_string(max_rows=150)
+
+    last_user_msg = next(
+        (m.content for m in reversed(req.messages) if m.role == "user"), "")
+    deep_dives = [_ticker_deep_dive(t, df)
+                  for t in _mentioned_tickers(last_user_msg, df.index.tolist())]
+    deep_dive_text = "\n".join(d for d in deep_dives if d)
+
+    system_prompt = (
+        "You are a quantitative stock analysis assistant for a momentum + "
+        "sentiment + fundamentals screener. Answer ONLY using the data below "
+        "(Yahoo Finance prices/fundamentals, Alpha Vantage + free news "
+        "sentiment history, and the computed AI Scores). Never use outside "
+        "knowledge, general opinions, or facts about the company you were "
+        "not given here. Always cite specific numbers from the data. If "
+        "asked about sentiment, refer to the actual historical scores and "
+        "label them by source (alphavantage = historical, free = today's "
+        "snapshot). The big table below is whitespace-aligned and easy to "
+        "misread across columns for a single row — when a 'DETAILED DATA' "
+        "section is present for a ticker, treat its key: value lines as the "
+        "authoritative source for that ticker and do not contradict them. "
+        "In replies, write field and sleeve names in plain English with no "
+        "underscores: say 'under the radar' not 'under_radar', 'Quality "
+        "Value sleeve' not 'quality_value', 'Niche Growth' not "
+        "'niche_growth'.\n\n"
+        f"SCREENER DATA AS OF {as_of} (one row per stock):\n{data_ctx}"
+        + (f"\n{deep_dive_text}" if deep_dive_text else "")
+    )
+
+    try:
+        client = OpenAI(api_key=key)
+        resp = client.chat.completions.create(
+            model="gpt-4.1-mini",
+            messages=[{"role": "system", "content": system_prompt}]
+            + [{"role": m.role, "content": m.content} for m in req.messages],
+            max_tokens=600,
+            temperature=0.2,
+        )
+        return {"reply": resp.choices[0].message.content}
+    except Exception as e:
+        raise HTTPException(502, f"OpenAI request failed: {e}")

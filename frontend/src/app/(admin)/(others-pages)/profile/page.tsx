@@ -152,6 +152,43 @@ export default function DataModelPage() {
         </div>
       </Section>
 
+      <Section title="The strategy views on the screener">
+        <p>
+          The buttons above the stock table are preset screens over the same
+          scored universe. They never change the scores themselves, only which
+          stocks you are looking at and how they are ordered.
+        </p>
+        <div className="space-y-3 pt-1">
+          <Row term="All Stocks">
+            The whole universe, ranked by AI Score from best to worst.
+          </Row>
+          <Row term="Buy Rated">
+            Only stocks whose AI Score is 6.5 or higher, the model&apos;s BUY
+            threshold. This is the shortlist the model likes right now.
+          </Row>
+          <Row term="Top Value">
+            The 25 cheapest stocks by Value score, filtered to decent quality
+            (fundamentals score of at least 5). For hunting bargains rather
+            than momentum.
+          </Row>
+          <Row term="Under the Radar">
+            Stocks carrying the Radar tag: strong fundamentals, cheap
+            valuation, quiet news, and not a mega-cap. The classic setup for a
+            re-rating before the crowd notices. Often a short list, and that
+            is by design.
+          </Row>
+          <Row term="Momentum Leaders">
+            The 25 strongest stocks by 12-month momentum (excluding the most
+            recent month). The market&apos;s current winners. Be aware this is
+            the most crowded, fastest-moving list.
+          </Row>
+          <Row term="Global (ex-US)">
+            Only the international names held via US listings: ASML, Novo
+            Nordisk, TSMC, Toyota and the rest of the Global group.
+          </Row>
+        </div>
+      </Section>
+
       <Section title="Value score and the Radar tag">
         <p>
           Separate from the AI Score, each stock gets a <strong>Value score</strong>{" "}
@@ -163,7 +200,10 @@ export default function DataModelPage() {
         <p>
           The <strong>Radar</strong> tag marks stocks with strong fundamentals, a
           cheap valuation and quiet news at the same time. That is the classic
-          &quot;good company, nobody excited yet&quot; setup.
+          &quot;good company, nobody excited yet&quot; setup. Mega-caps (above
+          roughly $200B) are excluded on principle: a trillion-dollar company
+          with neutral headlines is heavily covered news balancing out, not a
+          stock nobody is watching.
         </p>
       </Section>
 
@@ -173,12 +213,12 @@ export default function DataModelPage() {
             Around 58 large US companies (Apple, JPMorgan, Chevron...). The
             stable backbone with the deepest data history.
           </Row>
-          <Row term="Quality value">
+          <Row term="Quality Value">
             Around 32 excellent but under-covered businesses: high returns on
             capital, sensible prices, little media attention (McKesson, AutoZone,
             Chubb, homebuilders).
           </Row>
-          <Row term="Niche growth">
+          <Row term="Niche Growth">
             Around 22 liquid mid-cap growth names with real revenue (CrowdStrike,
             Datadog, Axon). The most speculative story stocks are deliberately
             excluded.

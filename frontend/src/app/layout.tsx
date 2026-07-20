@@ -12,6 +12,9 @@ export const metadata: Metadata = {
   },
   description:
     "Momentum + sentiment + fundamentals screener. Research tool, not investment advice.",
+  // Served statically from /public so Next 16's metadata image loader (which
+  // crashes on some SVGs) never touches it.
+  icons: { icon: "/icon.svg" },
 };
 
 const inter = Inter({

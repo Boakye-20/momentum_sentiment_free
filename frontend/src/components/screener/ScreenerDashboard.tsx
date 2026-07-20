@@ -5,7 +5,8 @@ import Badge from "@/components/ui/badge/Badge";
 import Sparkline from "./Sparkline";
 import ScoreBar from "./ScoreBar";
 import RadarTag from "./RadarTag";
-import { fetchScreener, fmtPct, Stock } from "@/lib/api";
+import Copilot from "./Copilot";
+import { fetchScreener, fmtPct, sleeveLabel, Stock } from "@/lib/api";
 
 const VIEWS = [
   "All stocks",
@@ -152,7 +153,7 @@ export default function ScreenerDashboard() {
       {staleDays > 5 && (
         <div className="rounded-xl border border-warning-500/40 bg-warning-50 px-4 py-3 text-sm text-gray-700 dark:bg-warning-500/10 dark:text-gray-200">
           Prices last updated <b>{asOf}</b> ({staleDays} days ago). The live
-          yfinance fetch failed, so you&apos;re seeing cached data — restart
+          yfinance fetch failed, so you&apos;re seeing cached data. Restart
           the API (or wait 15 min for its cache to expire) to retry.
         </div>
       )}
@@ -178,7 +179,7 @@ export default function ScreenerDashboard() {
                   {s.ticker}
                 </p>
                 <p className="text-xs text-gray-500 dark:text-gray-400">
-                  {s.sector} · {s.sleeve}
+                  {s.name ?? s.sector}
                 </p>
               </div>
               {actionBadge(s)}
@@ -241,10 +242,10 @@ export default function ScreenerDashboard() {
               onChange={(e) => setSleeve(e.target.value)}
               className="rounded-lg border border-gray-200 bg-transparent px-3 py-1.5 text-sm text-gray-600 dark:border-gray-700 dark:text-gray-300 dark:bg-gray-900"
             >
-              <option value="all">All sleeves</option>
+              <option value="all">All groups</option>
               {sleeves.map((s) => (
                 <option key={s} value={s}>
-                  {s}
+                  {sleeveLabel(s)}
                 </option>
               ))}
             </select>
@@ -257,9 +258,9 @@ export default function ScreenerDashboard() {
           </div>
         </div>
 
-        <div className="max-w-full overflow-x-auto">
+        <div className="max-h-[560px] max-w-full overflow-auto">
           <table className="w-full text-left text-sm">
-            <thead>
+            <thead className="sticky top-0 z-10 bg-white dark:bg-gray-900">
               <tr className="border-b border-gray-100 text-xs uppercase text-gray-500 dark:border-gray-800 dark:text-gray-400">
                 <th className="cursor-pointer px-5 py-3" onClick={() => sort("ticker")}>
                   Ticker{arrow("ticker")}
@@ -294,7 +295,9 @@ export default function ScreenerDashboard() {
                     >
                       {s.ticker}
                     </Link>
-                    <span className="block text-xs text-gray-400">{s.sleeve}</span>
+                    <span className="block text-xs text-gray-400">
+                      {s.name ?? sleeveLabel(s.sleeve)}
+                    </span>
                   </td>
                   <td className="px-5 py-3">{actionBadge(s)}</td>
                   <td className="px-5 py-3">
@@ -329,6 +332,8 @@ export default function ScreenerDashboard() {
           investment advice
         </p>
       </div>
+
+      <Copilot />
     </div>
   );
 }
