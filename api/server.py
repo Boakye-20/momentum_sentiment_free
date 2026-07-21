@@ -19,10 +19,14 @@ import threading
 import time
 from pathlib import Path
 
-# Load .env before reading any keys (T212_*, ALPHAVANTAGE_*, OPENAI_*, …)
+# Load .env before reading any keys (T212_*, ALPHAVANTAGE_*, OPENAI_*, …).
+# override=True so .env is always authoritative — otherwise a stray
+# already-set shell env var (e.g. a leftover $env:T212_ENV from an earlier
+# session) silently wins over what .env says, since load_dotenv() defaults
+# to never overwriting existing os.environ entries.
 try:
     from dotenv import load_dotenv
-    load_dotenv()
+    load_dotenv(override=True)
 except ImportError:
     pass
 
@@ -33,7 +37,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from config import CFG, SECTORS, TICKER_SLEEVE, TICKER_NAMES
-from src import momentum
+from src import momentum, signals
 from src.data import load_prices
 from src.scoring import compute_ai_score
 
@@ -268,6 +272,128 @@ def portfolio():
     return {"connected": True, "as_of": as_of, "positions": out}
 
 
+_T212_ORDERS_TTL = 60
+_t212_orders_cache: dict = {}
+
+
+def _fetch_t212_order_history(host: str, auth: str, max_pages: int = 5) -> list:
+    """Paginates GET /equity/history/orders (cursor-based). Read-only —
+    reports fills, never places orders. Respects the ~1 req/sec T212 rate
+    limit with a short sleep between pages."""
+    now = time.time()
+    cached = _t212_orders_cache.get("items")
+    if cached is not None and now - _t212_orders_cache.get("ts", 0) < _T212_ORDERS_TTL:
+        return cached
+
+    import urllib.request, json, urllib.parse
+    items: list = []
+    cursor = None
+    for page in range(max_pages):
+        params = {"limit": 50}
+        if cursor:
+            params["cursor"] = cursor
+        url = f"https://{host}.trading212.com/api/v0/equity/history/orders?{urllib.parse.urlencode(params)}"
+        req = urllib.request.Request(url, headers={"Authorization": auth})
+        try:
+            with urllib.request.urlopen(req, timeout=15) as r:
+                page_data = json.load(r)
+        except Exception as e:
+            if not items:
+                raise HTTPException(502, f"Trading212 order history request failed: {e}")
+            break
+        items.extend(page_data.get("items", []))
+        next_path = page_data.get("nextPagePath")
+        if not next_path:
+            break
+        parsed = urllib.parse.urlparse(next_path)
+        cursor = urllib.parse.parse_qs(parsed.query).get("cursor", [None])[0]
+        if not cursor:
+            break
+        time.sleep(1.1)  # respect 1 req/sec
+
+    _t212_orders_cache.update(items=items, ts=time.time())
+    return items
+
+
+def _normalise_order(raw: dict) -> dict:
+    """Best-effort field mapping for a T212 order. Field names confirmed
+    live against GET /equity/orders (working orders) on the demo account
+    2026-07-21: {ticker: "C_US_EQ", side: "BUY", status: "NEW", value: 4930,
+    filledValue: 0, createdAt: "...", ...} — notably T212 market orders can
+    be *value*-based (a £ amount, no share quantity at all) rather than
+    quantity-based, and `side` is explicit, not something to infer from a
+    quantity sign. /equity/history/orders (filled/cancelled orders) hasn't
+    been observed with real data yet, so extra candidate keys are kept for
+    that endpoint's possibly-different naming. `raw` is passed through in
+    full so nothing is silently dropped if a field name turns out to be
+    off once a fill is observed."""
+    def pick(*keys):
+        for k in keys:
+            if k in raw and raw[k] is not None:
+                return raw[k]
+        return None
+
+    qty = pick("filledQuantity", "quantity", "orderedQuantity")
+    value = pick("filledValue", "value", "orderedValue")
+    side = pick("side")
+    ticker_raw = pick("ticker") or ""
+    price = pick("fillPrice", "averagePrice", "limitPrice", "stopPrice")
+    if price is None and isinstance(qty, (int, float)) and qty and isinstance(value, (int, float)):
+        price = value / qty  # derive when only value + quantity are known
+    return {
+        "id": pick("id", "orderId"),
+        "ticker": str(ticker_raw).split("_")[0],
+        "t212_ticker": ticker_raw,
+        "status": pick("status"),
+        "side": side or ("SELL" if isinstance(qty, (int, float)) and qty < 0 else "BUY"),
+        "quantity": _clean(abs(qty)) if isinstance(qty, (int, float)) else None,
+        "fill_price": _clean(price),
+        "fill_value": _clean(value),
+        "date": pick("dateExecuted", "dateModified", "dateCreated", "createdAt", "updatedAt"),
+        "order_type": pick("type"),
+        "raw": {k: _clean(v) if not isinstance(v, (dict, list)) else v
+                for k, v in raw.items()},
+    }
+
+
+@app.get("/api/journal")
+def journal():
+    """Trade journal: your actual FILLED T212 orders (demo or live,
+    whichever T212_ENV points at), cross-checked against the model's
+    current AI Score/action for that ticker. Read-only — never places
+    orders, even though the configured key may have order permissions."""
+    key = os.environ.get("T212_API_KEY", "").strip()
+    secret = os.environ.get("T212_API_SECRET", "").strip()
+    placeholder = key.startswith("your_") or secret.startswith("your_")
+    if not key or placeholder:
+        return {"connected": False,
+                "message": "Set T212_API_KEY and T212_API_SECRET in .env "
+                           "to connect Trading212."}
+    env = os.environ.get("T212_ENV", "live").strip().lower()
+    host = "demo" if env == "demo" else "live"
+    if secret:
+        token = base64.b64encode(f"{key}:{secret}".encode()).decode()
+        auth = f"Basic {token}"
+    else:
+        auth = key
+
+    raw_orders = _fetch_t212_order_history(host, auth)
+    orders = [_normalise_order(o) for o in raw_orders]
+    orders = [o for o in orders if o["status"] in (None, "FILLED")]
+    orders.sort(key=lambda o: o["date"] or "", reverse=True)
+
+    df, as_of = _screener_df()
+    for o in orders:
+        t = o["ticker"]
+        row = df.loc[t] if t in df.index else None
+        o["ai_score"] = _clean(row["ai_score"]) if row is not None else None
+        o["action"] = row["action"] if row is not None else None
+        o["in_universe"] = row is not None
+
+    return {"connected": True, "env": env, "as_of": as_of,
+            "count": len(orders), "trades": orders}
+
+
 @app.get("/api/meta")
 def meta():
     df, as_of = _screener_df()
@@ -279,6 +405,51 @@ def meta():
         "hold": int((df["action"] == "HOLD").sum()),
         "avoid": int((df["action"] == "AVOID").sum()),
         "avg_score": round(float(df["ai_score"].mean()), 2),
+    }
+
+
+@app.get("/api/signals")
+def signals_endpoint(capital: float = 100_000.0):
+    """Today's Signal Book: names passing the entry filter (src/signals.py),
+    inverse-vol weighted, with a suggested £ allocation and share count for
+    the given capital. Read-only — mirrors the dashboard SIGNALS tab, using
+    the same cached sentiment snapshot as the screener (no live re-fetch)."""
+    df, as_of = _screener_df()
+    px = _cache["px"]
+    panels = momentum.build_panels(px)
+    today = px.index[-1]
+    sent_row = (df["sentiment_score"] if "sentiment_score" in df.columns
+                else pd.Series(0.0, index=df.index)).reindex(px.columns).fillna(0.0)
+
+    w = signals.weights_for_date(today, px, panels, sentiment=sent_row,
+                                  use_sentiment=True)
+    longs = w[w > 0].sort_values(ascending=False)
+
+    positions = []
+    for t, wgt in longs.items():
+        price = float(px[t].iloc[-1])
+        alloc = float(wgt) * capital
+        positions.append({
+            "ticker": t,
+            "name": TICKER_NAMES.get(t, t),
+            "sector": SECTORS.get(t, "Other"),
+            "sleeve": TICKER_SLEEVE.get(t, "core"),
+            "weight_pct": _clean(round(float(wgt) * 100, 2)),
+            "last_price": _clean(round(price, 2)),
+            "alloc_gbp": _clean(round(alloc, 2)),
+            "suggested_shares": int(alloc // price) if price > 0 else 0,
+            "mom_12m": _clean(panels["tsm"][t].iloc[-1]) if t in panels["tsm"].columns else None,
+            "ratio_52w": _clean(panels["ratio52"][t].iloc[-1]) if t in panels["ratio52"].columns else None,
+            "rsi": _clean(panels["rsi"][t].iloc[-1]) if t in panels["rsi"].columns else None,
+            "sentiment_score": _clean(sent_row.get(t, 0.0)),
+        })
+
+    return {
+        "as_of": as_of,
+        "capital": capital,
+        "gross_long_pct": round(float(w[w > 0].sum()) * 100, 1),
+        "count": len(positions),
+        "positions": positions,
     }
 
 

@@ -167,6 +167,60 @@ export const fetchMeta = () => get<Meta>("/api/meta");
 export const fetchStock = (t: string) => get<StockDetail>(`/api/stock/${t}`);
 export const fetchPortfolio = () => get<PortfolioResponse>("/api/portfolio");
 
+export interface SignalPosition {
+  ticker: string;
+  name?: string;
+  sector: string;
+  sleeve: string;
+  weight_pct: number;
+  last_price: number;
+  alloc_gbp: number;
+  suggested_shares: number;
+  mom_12m: number | null;
+  ratio_52w: number | null;
+  rsi: number | null;
+  sentiment_score: number | null;
+}
+
+export interface SignalsResponse {
+  as_of: string;
+  capital: number;
+  gross_long_pct: number;
+  count: number;
+  positions: SignalPosition[];
+}
+
+export const fetchSignals = (capital: number) =>
+  get<SignalsResponse>(`/api/signals?capital=${capital}`);
+
+export interface JournalTrade {
+  id: string | number | null;
+  ticker: string;
+  t212_ticker: string;
+  status: string | null;
+  side: "BUY" | "SELL";
+  quantity: number | null;
+  fill_price: number | null;
+  fill_value: number | null;
+  date: string | null;
+  order_type: string | null;
+  ai_score: number | null;
+  action: string | null;
+  in_universe: boolean;
+  raw: Record<string, unknown>;
+}
+
+export interface JournalResponse {
+  connected: boolean;
+  message?: string;
+  env?: string;
+  as_of?: string;
+  count?: number;
+  trades?: JournalTrade[];
+}
+
+export const fetchJournal = () => get<JournalResponse>("/api/journal");
+
 export async function askCopilot(messages: ChatMessage[]): Promise<CopilotResponse> {
   const r = await fetch("/api/copilot", {
     method: "POST",

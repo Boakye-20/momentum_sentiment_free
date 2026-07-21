@@ -8,7 +8,9 @@ import {
   ChevronDownIcon,
   GridIcon,
   HorizontaLDots,
+  ListIcon,
   PieChartIcon,
+  TaskIcon,
   UserCircleIcon,
 } from "../icons/index";
 
@@ -29,6 +31,16 @@ const navItems: NavItem[] = [
     icon: <PieChartIcon />,
     name: "Portfolio",
     path: "/portfolio",
+  },
+  {
+    icon: <ListIcon />,
+    name: "Signals",
+    path: "/signals",
+  },
+  {
+    icon: <TaskIcon />,
+    name: "Journal",
+    path: "/journal",
   },
   {
     icon: <BoltIcon />,

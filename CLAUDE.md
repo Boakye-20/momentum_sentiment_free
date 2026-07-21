@@ -227,6 +227,8 @@ cd backend
 source venv/bin/activate
 python -m pytest tests/              # Run core quantitative logic tests
 python main.py run-pipeline --dev    # Run data ingestion & scoring locally
+uvicorn api.server:app --port 8000 --reload
+
 
 # Terminal 2: Frontend Dashboard
 cd frontend
