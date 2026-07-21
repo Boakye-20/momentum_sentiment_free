@@ -256,15 +256,19 @@ def portfolio():
     df, as_of = _screener_df()
     out = []
     for p in positions:
-        raw = p.get("ticker", "")          # e.g. "AAPL_US_EQ"
+        # Confirmed live against GET /equity/positions on the demo account
+        # 2026-07-21: ticker lives under instrument.ticker (not top-level
+        # "ticker"), avg price is "averagePricePaid", and P/L is nested
+        # under walletImpact.unrealizedProfitLoss — not top-level "ppl".
+        raw = p.get("instrument", {}).get("ticker", "")   # e.g. "AAPL_US_EQ"
         sym = raw.split("_")[0]
         score_row = df.loc[sym] if sym in df.index else None
         out.append({
             "ticker": sym, "t212_ticker": raw,
             "quantity": _clean(p.get("quantity")),
-            "average_price": _clean(p.get("averagePrice")),
+            "average_price": _clean(p.get("averagePricePaid")),
             "current_price": _clean(p.get("currentPrice")),
-            "ppl": _clean(p.get("ppl")),
+            "ppl": _clean(p.get("walletImpact", {}).get("unrealizedProfitLoss")),
             "ai_score": _clean(score_row["ai_score"]) if score_row is not None else None,
             "action": score_row["action"] if score_row is not None else None,
             "in_universe": score_row is not None,
@@ -316,52 +320,150 @@ def _fetch_t212_order_history(host: str, auth: str, max_pages: int = 5) -> list:
 
 
 def _normalise_order(raw: dict) -> dict:
-    """Best-effort field mapping for a T212 order. Field names confirmed
-    live against GET /equity/orders (working orders) on the demo account
-    2026-07-21: {ticker: "C_US_EQ", side: "BUY", status: "NEW", value: 4930,
-    filledValue: 0, createdAt: "...", ...} — notably T212 market orders can
-    be *value*-based (a £ amount, no share quantity at all) rather than
-    quantity-based, and `side` is explicit, not something to infer from a
-    quantity sign. /equity/history/orders (filled/cancelled orders) hasn't
-    been observed with real data yet, so extra candidate keys are kept for
-    that endpoint's possibly-different naming. `raw` is passed through in
-    full so nothing is silently dropped if a field name turns out to be
-    off once a fill is observed."""
-    def pick(*keys):
+    """Field mapping for a T212 order, confirmed live on the demo account
+    2026-07-21 against two DIFFERENT schemas:
+
+    GET /equity/orders (working/pending orders) — flat:
+      {ticker, side, status: "NEW", value, filledValue: 0, createdAt, ...}
+
+    GET /equity/history/orders (what /api/journal actually calls) — items
+    are nested {"order": {...same shape as above...}, "fill": {"quantity",
+    "price", "filledAt", "walletImpact": {...}}}. The order's own ticker/
+    side/status/value live under "order"; the actual executed quantity and
+    per-share price only exist under "fill" (order.filledValue is the £
+    amount, not a share count — T212 market orders here were value-based).
+
+    Handles both shapes so this survives if ever pointed at /equity/orders
+    too. `raw` is passed through in full (nested dicts kept as-is) so
+    nothing is silently dropped if a field turns out to be named
+    differently in a case this hasn't seen yet (e.g. a SELL, a LIMIT order,
+    a partial fill)."""
+    order = raw.get("order", raw)   # nested (history) vs flat (working orders)
+    fill = raw.get("fill") or {}
+
+    def pick(d, *keys):
         for k in keys:
-            if k in raw and raw[k] is not None:
-                return raw[k]
+            if k in d and d[k] is not None:
+                return d[k]
         return None
 
-    qty = pick("filledQuantity", "quantity", "orderedQuantity")
-    value = pick("filledValue", "value", "orderedValue")
-    side = pick("side")
-    ticker_raw = pick("ticker") or ""
-    price = pick("fillPrice", "averagePrice", "limitPrice", "stopPrice")
+    ticker_raw = (pick(order, "ticker")
+                  or order.get("instrument", {}).get("ticker", ""))
+    qty = pick(fill, "quantity") or pick(order, "filledQuantity", "quantity")
+    value = pick(order, "filledValue", "value", "orderedValue")
+    price = pick(fill, "price") or pick(order, "fillPrice", "averagePrice",
+                                         "limitPrice", "stopPrice")
     if price is None and isinstance(qty, (int, float)) and qty and isinstance(value, (int, float)):
         price = value / qty  # derive when only value + quantity are known
+    date = pick(fill, "filledAt") or pick(order, "dateExecuted",
+                                           "dateModified", "dateCreated",
+                                           "createdAt", "updatedAt")
+    side = pick(order, "side")
+
     return {
-        "id": pick("id", "orderId"),
+        "id": pick(order, "id", "orderId"),
         "ticker": str(ticker_raw).split("_")[0],
         "t212_ticker": ticker_raw,
-        "status": pick("status"),
+        "status": pick(order, "status"),
         "side": side or ("SELL" if isinstance(qty, (int, float)) and qty < 0 else "BUY"),
         "quantity": _clean(abs(qty)) if isinstance(qty, (int, float)) else None,
         "fill_price": _clean(price),
         "fill_value": _clean(value),
-        "date": pick("dateExecuted", "dateModified", "dateCreated", "createdAt", "updatedAt"),
-        "order_type": pick("type"),
+        "date": date,
+        "order_type": pick(order, "type"),
         "raw": {k: _clean(v) if not isinstance(v, (dict, list)) else v
                 for k, v in raw.items()},
     }
+
+
+_HIST_SCORE_CACHE: dict = {}
+_HIST_SCORE_TTL = 60 * 60  # underlying prices/sentiment log for a past date don't change
+
+
+def _historical_snapshot_scores(date_key: str) -> pd.DataFrame:
+    """Reconstruct the full-universe AI Score as it stood at `date_key`, for
+    the Journal's 'score at time of trade' column.
+
+    Reuses the same technical-panel logic as the backtest/signals engine
+    (momentum.build_panels) and the same date-lookup rule used throughout
+    this app: nearest available close ON OR BEFORE the target date. For an
+    order filled intraday, that naturally resolves to *yesterday's* close —
+    which is correct, since that's the close the signal was actually built
+    from when the trade executed (see the T+1 execution discussion: you
+    always trade on the prior day's signal).
+
+    Sentiment is looked up from data/sentiment_history.csv (nearest logged
+    snapshot per ticker on/before the date; neutral 0.0 if none logged that
+    far back yet — never fabricated, per the project's own rule).
+
+    Fundamentals have NO history in this app (7-day-TTL cache, current only)
+    — the CURRENT cached values are reused here as an approximation, since
+    fundamentals move slowly relative to price/sentiment and there is no
+    historical fundamentals store to draw from instead. This means the
+    reconstructed score's fundamentals layer (30% weight) is NOT truly
+    point-in-time; only the technical + sentiment layers are.
+
+    Cross-sectional normalisation (min-max/winsorised across the universe)
+    requires scoring the WHOLE universe for that date, not just one ticker
+    — hence this returns a full DataFrame, cached per date."""
+    now = time.time()
+    cached = _HIST_SCORE_CACHE.get(date_key)
+    if cached is not None and now - cached["ts"] < _HIST_SCORE_TTL:
+        return cached["df"]
+
+    df, as_of = _screener_df()
+    px = _cache["px"]
+    target = min(pd.Timestamp(date_key), px.index.max())
+    panels = momentum.build_panels(px)
+
+    def row_at(frame: pd.DataFrame) -> pd.Series:
+        idx = frame.index.get_indexer([target], method="ffill")[0]
+        return frame.iloc[idx] if idx >= 0 else pd.Series(dtype=float)
+
+    price_row = row_at(px)
+    ma_long_row = row_at(panels["ma_long"]) if "ma_long" in panels else pd.Series(dtype=float)
+
+    snap = pd.DataFrame(index=px.columns)
+    snap["mom_12m"] = row_at(panels["tsm"]) if "tsm" in panels else np.nan
+    snap["ratio_52w"] = row_at(panels["ratio52"]) if "ratio52" in panels else np.nan
+    snap["rsi"] = row_at(panels["rsi"]) if "rsi" in panels else np.nan
+    snap["above_long_ma"] = ((price_row > ma_long_row).astype(int)
+                              if not ma_long_row.empty else 0)
+    snap["volatility"] = row_at(panels["vol"]) if "vol" in panels else np.nan
+    if "macd_hist" in panels:
+        snap["macd_hist"] = row_at(panels["macd_hist"])
+
+    sent_col = pd.Series(0.0, index=px.columns)
+    try:
+        p = Path(CFG.paths.sentiment_log)
+        if p.exists():
+            hist = pd.read_csv(p, parse_dates=["date"])
+            hist = hist[hist.date <= target]
+            if not hist.empty:
+                latest = hist.sort_values("date").groupby("ticker").tail(1)
+                sent_col = (latest.set_index("ticker")["score"]
+                            .reindex(px.columns).fillna(0.0))
+    except Exception:
+        pass
+    snap["sentiment_score"] = sent_col
+
+    for c in ("roe", "pe_forward", "debt_equity", "gross_margin",
+              "revenue_growth", "operating_margin", "market_cap"):
+        if c in df.columns:
+            snap[c] = df[c].reindex(px.columns)
+
+    scored = compute_ai_score(snap)
+    _HIST_SCORE_CACHE[date_key] = {"df": scored, "ts": now}
+    return scored
 
 
 @app.get("/api/journal")
 def journal():
     """Trade journal: your actual FILLED T212 orders (demo or live,
     whichever T212_ENV points at), cross-checked against the model's
-    current AI Score/action for that ticker. Read-only — never places
-    orders, even though the configured key may have order permissions."""
+    current AI Score/action AND the score as it stood on the trade date.
+    Read-only — never places orders, even though the configured key may
+    have order permissions."""
     key = os.environ.get("T212_API_KEY", "").strip()
     secret = os.environ.get("T212_API_SECRET", "").strip()
     placeholder = key.startswith("your_") or secret.startswith("your_")
@@ -389,6 +491,20 @@ def journal():
         o["ai_score"] = _clean(row["ai_score"]) if row is not None else None
         o["action"] = row["action"] if row is not None else None
         o["in_universe"] = row is not None
+
+        o["ai_score_at_trade"] = None
+        o["action_at_trade"] = None
+        if o["date"]:
+            try:
+                date_key = str(pd.Timestamp(o["date"]).date())
+                hist_df = _historical_snapshot_scores(date_key)
+                hrow = hist_df.loc[t] if t in hist_df.index else None
+                if hrow is not None:
+                    o["ai_score_at_trade"] = _clean(hrow["ai_score"])
+                    if pd.notna(hrow["action"]):
+                        o["action_at_trade"] = str(hrow["action"])
+            except Exception:
+                pass
 
     return {"connected": True, "env": env, "as_of": as_of,
             "count": len(orders), "trades": orders}
