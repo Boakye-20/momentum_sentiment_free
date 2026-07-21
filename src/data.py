@@ -156,6 +156,53 @@ def load_prices(
     return prices
 
 
+def load_point_in_time_universe(as_of_date: str,
+                                path: str = "data/universe_2015.csv") -> list[str]:
+    """
+    Return the tickers that were index constituents as of `as_of_date`,
+    INCLUDING names later removed or delisted — the point of a
+    survivorship-free backtest.
+
+    Reads a CSV with columns: ticker, added_date, removed_date, removal_reason.
+    A ticker counts if added_date <= as_of AND (no removed_date OR
+    removed_date > as_of).
+
+    IMPORTANT — this is scaffolding, not a finished fix. Two hard problems
+    remain before it makes backtests honest:
+      1. The CSV must be populated with a real point-in-time constituent
+         history (e.g. from Wikipedia's "List of S&P 500 companies" Changes
+         table). The shipped file is a small STUB with a handful of real
+         examples; it is not complete.
+      2. yfinance frequently cannot fetch prices for DELISTED tickers (the very
+         names that survivorship bias hides). Even with a complete CSV, those
+         names may have no price history on the free tier, so a fully honest
+         backtest likely needs a paid data source. Do not assume this function
+         alone removes survivorship bias.
+    """
+    import csv
+    p = Path(path)
+    if not p.exists():
+        raise FileNotFoundError(
+            f"{path} not found. Populate it with a point-in-time constituent "
+            "history (ticker, added_date, removed_date, removal_reason) from "
+            "e.g. https://en.wikipedia.org/wiki/List_of_S%26P_500_companies "
+            "(Changes table) back to your backtest start. See the docstring "
+            "for the yfinance delisted-price caveat.")
+    cutoff = pd.Timestamp(as_of_date)
+    out: list[str] = []
+    with open(p, newline="") as f:
+        for row in csv.DictReader(f):
+            if not row.get("ticker") or not row.get("added_date"):
+                continue
+            if pd.Timestamp(row["added_date"]) > cutoff:
+                continue
+            removed = row.get("removed_date") or ""
+            if removed and pd.Timestamp(removed) <= cutoff:
+                continue
+            out.append(row["ticker"].strip())
+    return out
+
+
 def refresh_price_cache(max_age_days: int = 3) -> bool:
     """
     Bring data/price_cache.parquet up to today (tail-only top-up).

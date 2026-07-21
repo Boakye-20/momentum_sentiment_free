@@ -15,8 +15,11 @@ from dataclasses import dataclass, field
 import numpy as np
 import pandas as pd
 
-from config import CFG
+from config import CFG, SECTORS
 from src import momentum, signals, sentiment as sent_mod
+
+# No single sector may hold more than this share of gross long exposure.
+MAX_SECTOR_WEIGHT = 0.40
 
 
 @dataclass
@@ -37,15 +40,56 @@ def _rebalance_dates(index: pd.DatetimeIndex) -> pd.DatetimeIndex:
     return pd.DatetimeIndex(s.groupby(index.to_period(CFG.portfolio.rebalance)).last().values)
 
 
+def _apply_sector_cap(weights: pd.Series,
+                      max_sector: float = MAX_SECTOR_WEIGHT) -> pd.Series:
+    """Cap any single sector's share of gross long exposure by scaling the
+    breaching sector down and redistributing to the rest.
+
+    Critically, this PRESERVES the original total gross. In a risk_off month
+    the signal deliberately sizes the book to 0.5 gross (the drawdown brake);
+    renormalising to 1.0 here would silently undo that protection exactly when
+    it matters, so we renormalise back to the original gross instead."""
+    longs = weights[weights > 0].copy()
+    if longs.empty:
+        return weights
+    gross = float(longs.sum())
+    sectors = {t: SECTORS.get(t, "Other") for t in longs.index}
+    limit = max_sector * gross
+    for _ in range(10):                       # iterate to convergence
+        totals: dict[str, float] = {}
+        for t, w in longs.items():
+            totals[sectors[t]] = totals.get(sectors[t], 0.0) + w
+        breach = {s: v for s, v in totals.items() if v > limit + 1e-12}
+        if not breach:
+            break
+        for s, total in breach.items():
+            scale = limit / total
+            for t in longs.index:
+                if sectors[t] == s:
+                    longs[t] *= scale
+        longs = gross * longs / longs.sum()   # preserve gross, never 1.0
+    out = weights.copy()
+    out[longs.index] = longs.values
+    return out
+
+
 def _build_target_weights(prices, panels, sent_panel, use_sentiment) -> pd.DataFrame:
     rebals = _rebalance_dates(prices.index)
     rows = {}
     min_hist = CFG.backtest.min_history_days
+    # CHANGE SET 6 (Chen/Chou/Hsieh): carry last rebalance's selected longs so
+    # the consistent-momentum filter can distinguish repeat winners from
+    # one-month wonders.
+    prev_top: list[str] | None = None
     for d in rebals:
         if prices.index.get_loc(d) < min_hist:
             continue
         sent_row = sent_panel.loc[d] if (use_sentiment and d in sent_panel.index) else None
-        rows[d] = signals.weights_for_date(d, prices, panels, sent_row, use_sentiment)
+        w = signals.weights_for_date(d, prices, panels, sent_row, use_sentiment,
+                                     prev_top=prev_top)
+        w = _apply_sector_cap(w)
+        rows[d] = w
+        prev_top = w[w > 0].index.tolist()
     if not rows:
         return pd.DataFrame(columns=prices.columns)
     return pd.DataFrame(rows).T.reindex(columns=prices.columns).fillna(0.0)
@@ -202,16 +246,18 @@ def _metrics(equity, benchmark, daily, trades) -> dict:
     }
 
 
-def _walk_forward(equity, benchmark) -> list:
+def _cagr_of(s: pd.Series) -> float:
+    if len(s) < 2:
+        return 0.0
+    r = s.iloc[-1] / s.iloc[0] - 1
+    n = (s.index[-1] - s.index[0]).days / 365.25
+    return round(((1 + r) ** (1 / n) - 1) * 100, 2) if n > 0 else 0.0
+
+
+def _walk_forward_legacy(equity, benchmark) -> list:
+    """Pre-CS4 rolling in/out-of-sample windows (kept for reference)."""
     in_y, out_y = CFG.backtest.in_sample_years, CFG.backtest.out_sample_years
     folds, start, end_all = [], equity.index[0], equity.index[-1]
-
-    def _cagr(s):
-        if len(s) < 2:
-            return 0.0
-        r = s.iloc[-1] / s.iloc[0] - 1
-        n = (s.index[-1] - s.index[0]).days / 365.25
-        return round(((1 + r) ** (1 / n) - 1) * 100, 2) if n > 0 else 0.0
 
     while True:
         in_end = start + pd.DateOffset(years=in_y)
@@ -222,11 +268,65 @@ def _walk_forward(equity, benchmark) -> list:
         oe = equity[(equity.index >= in_end) & (equity.index < out_end)]
         folds.append({
             "window": f"{start.date()} -> {out_end.date()}",
-            "in_cagr": _cagr(ie), "out_cagr": _cagr(oe),
-            "out_bench": _cagr(benchmark.reindex(oe.index).ffill()),
+            "in_cagr": _cagr_of(ie), "out_cagr": _cagr_of(oe),
+            "out_bench": _cagr_of(benchmark.reindex(oe.index).ffill()),
         })
         start += pd.DateOffset(years=out_y)
     return folds
+
+
+def _purged_walk_forward(equity, benchmark) -> list:
+    """Lopez de Prado (2018), "Advances in Financial ML" ch.7: purged K-fold
+    with an embargo. The equity curve is split into N equal folds; each fold
+    is scored out-of-sample while the "training" side excludes an embargo
+    window around the test boundaries, preventing information from bleeding
+    across the split.
+
+    Honest caveat: this strategy's rules are FIXED (nothing is refit per
+    fold), so purging cannot change the test-fold returns themselves — here
+    the folds act as a contamination-free consistency report across market
+    eras rather than model validation. Emits both the new keys
+    (fold/period/out_cagr/bench_cagr/ratio) and the legacy aliases
+    (window/in_cagr/out_cagr/out_bench) so the dashboard, report and web UI
+    keep working unchanged.
+    """
+    n = max(2, getattr(CFG.backtest, "wf_n_folds", 6))
+    emb = max(0, getattr(CFG.backtest, "wf_embargo_days", 10))
+    idx = equity.index
+    daily = equity.pct_change().fillna(0.0)
+    fold_slices = np.array_split(np.arange(len(idx)), n)
+
+    out = []
+    for k, f in enumerate(fold_slices):
+        if len(f) < 2:
+            continue
+        test = equity.iloc[f]
+        # Training set = everything outside the test fold ± embargo.
+        mask = np.ones(len(idx), dtype=bool)
+        mask[max(0, f[0] - emb): min(len(idx), f[-1] + emb + 1)] = False
+        train_ret = daily[mask]
+        if len(train_ret) > 1:
+            geo = float((1 + train_ret).prod() ** (252.0 / len(train_ret)) - 1)
+            in_cagr = round(geo * 100, 2)
+        else:
+            in_cagr = 0.0
+
+        out_cagr = _cagr_of(test)
+        bench_cagr = _cagr_of(benchmark.reindex(test.index).ffill())
+        period = f"{test.index[0].date()} -> {test.index[-1].date()}"
+        out.append({
+            # new keys (CS4 spec)
+            "fold": k + 1,
+            "period": period,
+            "out_cagr": out_cagr,
+            "bench_cagr": bench_cagr,
+            "ratio": round(out_cagr / bench_cagr, 2) if bench_cagr else 0.0,
+            # legacy aliases consumed by dashboard.py / report.py / web UI
+            "window": period,
+            "in_cagr": in_cagr,
+            "out_bench": bench_cagr,
+        })
+    return out
 
 
 def run_backtest(prices: pd.DataFrame, benchmark: pd.Series,
@@ -237,7 +337,8 @@ def run_backtest(prices: pd.DataFrame, benchmark: pd.Series,
           f"{prices.index[0].date()} -> {prices.index[-1].date()}, "
           f"sentiment_overlay={use_sentiment}")
 
-    panels = momentum.build_panels(prices)
+    # benchmark feeds the Daniel-Moskowitz crash-risk panel (CHANGE SET 2)
+    panels = momentum.build_panels(prices, benchmark=benchmark)
     sent_panel = (sent_mod.load_sentiment_panel(prices.index, list(prices.columns))
                   if use_sentiment else None)
 
@@ -250,6 +351,24 @@ def run_backtest(prices: pd.DataFrame, benchmark: pd.Series,
     eff = daily_w.shift(CFG.portfolio.execution_delay_days).fillna(0.0)
 
     asset_ret = prices.pct_change().fillna(0.0)
+
+    # CHANGE SET 1 (Barroso & Santa-Clara 2015, "Momentum Has Its Moments"):
+    # scale the whole book so realised portfolio vol tracks a constant target.
+    # Scalar = target_var / 126d realised var, sampled at rebalance dates,
+    # ffilled between them, capped [0.25, 2.0], and lagged by the execution
+    # delay so no same-day variance information leaks into sizing.
+    if getattr(CFG.portfolio, "use_vol_targeting", False):
+        pre_cost = (eff * asset_ret).sum(axis=1)
+        realised_var = pre_cost.rolling(126).var()
+        target_var = (CFG.portfolio.vol_target_pct / 100.0) ** 2 / 252.0
+        scalar = (target_var / realised_var).clip(0.25, 2.0)
+        rebals = _rebalance_dates(prices.index)
+        scalar = (scalar.reindex(rebals)
+                  .reindex(prices.index).ffill()
+                  .shift(CFG.portfolio.execution_delay_days)
+                  .fillna(1.0))
+        eff = eff.mul(scalar, axis=0)
+
     gross = (eff * asset_ret).sum(axis=1)
     turnover = eff.diff().abs().sum(axis=1)
     turnover.iloc[0] = eff.iloc[0].abs().sum()
@@ -270,7 +389,7 @@ def run_backtest(prices: pd.DataFrame, benchmark: pd.Series,
     trades = _trades_from_weights(eff.loc[live:], prices.loc[live:])
     metrics = _metrics(equity, bench, net, trades)
     duration = _duration_analytics(trades, equity)
-    wf = _walk_forward(equity, bench)
+    wf = _purged_walk_forward(equity, bench)
 
     print(f"[backtest] done. final equity £{equity.iloc[-1]:,.0f} "
           f"| CAGR {metrics['cagr_pct']}% vs bench {metrics['benchmark_cagr_pct']}% "

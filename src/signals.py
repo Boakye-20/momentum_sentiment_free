@@ -35,14 +35,26 @@ def _zscore(s: pd.Series) -> pd.Series:
 
 def _long_weights(longs: list[str], panels: dict, date: pd.Timestamp,
                   gross: float) -> pd.Series:
-    """Inverse-realised-vol sizing across the selected longs (equal-weight
-    fallback when vol is unavailable). Sum of weights == gross either way."""
-    if CFG.portfolio.use_inverse_vol_weights and "vol" in panels:
-        vol = _at(panels["vol"], date).reindex(longs)
-        inv = 1.0 / vol.replace(0.0, np.nan)
-        if inv.notna().all() and np.isfinite(inv).all():
-            return gross * inv / inv.sum()
-    return pd.Series(gross / len(longs), index=longs)
+    """Inverse-realised-vol sizing across the selected longs.
+
+    Two fixes vs the old version: (1) a *partial* fallback — a ticker with
+    missing/infinite vol is filled with the median inverse-vol, instead of the
+    whole book silently collapsing to equal weight when a single name is bad;
+    (2) a cap at 2x the equal weight, so a very low-vol name (a KO or MA) can't
+    balloon to 20%+ of the book and turn one bad month into a large drawdown.
+    Sum of weights == gross either way."""
+    if not (CFG.portfolio.use_inverse_vol_weights and "vol" in panels):
+        return pd.Series(gross / len(longs), index=longs)
+
+    vol = _at(panels["vol"], date).reindex(longs)
+    inv = (1.0 / vol.replace(0.0, np.nan)).replace([np.inf, -np.inf], np.nan)
+    median_inv = inv.median()
+    inv = inv.fillna(median_inv if np.isfinite(median_inv) else 1.0)
+
+    raw = gross * inv / inv.sum()
+    cap = gross / len(longs) * 2.0
+    capped = raw.clip(upper=cap)
+    return gross * capped / capped.sum()
 
 
 def weights_for_date(
@@ -51,15 +63,23 @@ def weights_for_date(
     panels: dict[str, pd.DataFrame],
     sentiment: pd.Series | None = None,
     use_sentiment: bool = False,
+    prev_top: list[str] | None = None,
 ) -> pd.Series:
     """
     Return a Series of target weights (index=tickers) for one rebalance date.
     Longs are positive, shorts negative. Gross long <= 1.0, gross short
     <= max_gross_short. Regime scales exposure when enabled.
+    `prev_top` is last rebalance's selected longs, used by the optional
+    consistent-momentum filter (Chen/Chou/Hsieh).
     """
     sc, pc = CFG.signal, CFG.portfolio
     px      = _at(prices, date)
     tsm     = _at(panels["tsm"], date)
+    # CHANGE SET 3 (Blitz/Huij/Martens, Residual Momentum): opt in to ranking
+    # and gating on factor-residual momentum instead of raw returns.
+    if (getattr(CFG.momentum, "use_residual_momentum", False)
+            and "residual_tsm" in panels):
+        tsm = _at(panels["residual_tsm"], date)
     ratio   = _at(panels["ratio52"], date)
     rsi     = _at(panels["rsi"], date)
     ma_long = _at(panels["ma_long"], date)
@@ -79,6 +99,28 @@ def weights_for_date(
     if use_sentiment:
         long_mask &= (sent >= sc.long_sentiment_min)
     long_mask = long_mask.reindex(tickers).fillna(False)
+
+    # CHANGE SET 5 (Gray & Vogel, Quantitative Momentum): path-of-momentum
+    # quality gate — require a minimum fraction of positive monthly returns
+    # in the formation window. Inactive at the default threshold of 0.0
+    # (a NaN-safe explicit guard, so default results are unchanged).
+    if (getattr(sc, "momentum_quality_min", 0.0) > 0
+            and "momentum_quality" in panels):
+        quality = _at(panels["momentum_quality"], date)
+        long_mask &= (quality >= sc.momentum_quality_min) \
+            .reindex(tickers).fillna(False)
+
+    # CHANGE SET 6 (Chen/Chou/Hsieh, Consistent Momentum): a long candidate
+    # must be a consistent winner (also selected last rebalance) OR a fresh
+    # entrant with top-decile-strength momentum (top X% of universe by TSM),
+    # filtering out one-big-month wonders that tend to revert.
+    if (prev_top is not None
+            and getattr(sc, "require_consistent_momentum", False)):
+        thresh = tsm.quantile(1.0 - sc.consistent_momentum_top_pct)
+        fresh_strong = (tsm >= thresh).reindex(tickers).fillna(False)
+        held_before = pd.Series(
+            [t in set(prev_top) for t in tickers], index=tickers)
+        long_mask &= (held_before | fresh_strong)
 
     # ── SHORT gate (optional) ────────────────────────────────────────────
     short_mask = pd.Series(False, index=tickers)
@@ -103,6 +145,14 @@ def weights_for_date(
             long_gross, max_n, allow_shorts = 0.5, max(3, pc.max_positions // 2), allow_shorts
         elif regime == "neutral":
             allow_shorts = False
+
+    # CHANGE SET 2 (Daniel & Moskowitz, Momentum Crashes): when the market is
+    # rebounding out of a bear (the classic momentum-crash setup), cap long
+    # gross at 0.3 regardless of what the breadth regime says.
+    if getattr(pc, "use_crash_risk_filter", False) and "crash_risk" in panels:
+        crash = _at(panels["crash_risk"], date)
+        if isinstance(crash, str) and crash == "elevated":
+            long_gross = min(long_gross, 0.3)
 
     # ── Rank & select longs ──────────────────────────────────────────────
     # z-score both terms so the blend weight means what it says (raw sentiment

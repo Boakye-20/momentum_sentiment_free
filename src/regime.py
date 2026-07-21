@@ -26,6 +26,25 @@ import pandas as pd
 from config import CFG
 
 
+def daniel_moskowitz_crash_risk(benchmark: pd.Series) -> pd.Series:
+    """Daniel & Moskowitz (2016), "Momentum Crashes": momentum crashes cluster
+    in panic states — after a bear market, exactly when the market starts
+    rebounding sharply (crashed past-losers rip upward and momentum longs lag).
+    Flags each day "elevated" when the benchmark's trailing 24-month return is
+    negative AND its trailing 1-month return is positive, else "normal".
+
+    (The paper also conditions on high ex-ante market volatility; that third
+    leg is covered separately by the vol-spike override in breadth_regime.)
+    """
+    bench = benchmark.dropna()
+    ret_24m = bench / bench.shift(504) - 1     # ~24 months of trading days
+    ret_1m = bench / bench.shift(21) - 1       # ~1 month
+    elevated = (ret_24m < 0) & (ret_1m > 0)
+    out = pd.Series("normal", index=benchmark.index, name="crash_risk")
+    out.loc[elevated.reindex(benchmark.index).fillna(False)] = "elevated"
+    return out
+
+
 def _features(prices: pd.DataFrame) -> pd.DataFrame:
     """Market-level features: equal-weight return, rolling vol, dispersion."""
     rets = prices.pct_change()

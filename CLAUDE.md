@@ -58,11 +58,17 @@ cd frontend && npm install && npm run dev  # terminal 2 — http://localhost:300
   so it suits background jobs, not web requests — the API server serves
   the cache and lets `scripts/daily_fetch.py` call `refresh_price_cache()`).
   `source="synthetic"` for offline testing — never silently substitute fake
-  data for real data anywhere else.
+  data for real data anywhere else. `load_point_in_time_universe()` +
+  `data/universe_2015.csv` are SCAFFOLDING for a survivorship-free universe,
+  NOT a finished fix: the CSV is a 5-row stub, and yfinance can't fetch prices
+  for delisted names (the ones bias hides), so the current backtest is still
+  survivorship-biased — see data/universe_2015.README.md.
 - `src/momentum.py` — TSM (12-1: skips the most recent month), 52w-high ratio,
   RSI, MAs, realised vol (for inverse-vol sizing), breadth regime, and a
   native price-normalised MACD histogram (`macd_hist` panel, pure pandas —
-  no pandas-ta needed).
+  no pandas-ta needed). `breadth_regime` also has a cross-sectional vol-spike
+  override: if universe avg 20d realised vol > 2.5x its trailing-year median,
+  force risk_off regardless of breadth (catches crashes weeks earlier).
 - `src/regime.py` — optional 3-state Gaussian-HMM regime detector
   (`CFG.momentum.regime_method = "hmm"`, needs free `hmmlearn`). Walk-forward
   refit on an expanding window — never full-sample-fit (look-ahead). Falls
@@ -80,6 +86,9 @@ cd frontend && npm install && npm run dev  # terminal 2 — http://localhost:300
   60-day gap rule — they must never mask missing history (a bug that once
   hid 25 tickers).
 - `src/signals.py` — turns momentum + sentiment panels into target weights.
+  Inverse-vol sizing has a *partial* fallback (missing vol -> median inverse-vol,
+  not a full equal-weight collapse) and caps any single position at 2x equal
+  weight, so a low-vol name can't balloon to 20%+ of the book.
 - `src/scoring.py` — composite AI Score (1–10) + BUY/HOLD/AVOID labels.
   Three layers: technical 45% (TSM, RSI pullback, 52w proximity, vol, MACD),
   sentiment 25% (VADER/AV score mapped to [0,1]), fundamentals 30% (ROE, P/E,
@@ -94,7 +103,9 @@ cd frontend && npm install && npm run dev  # terminal 2 — http://localhost:300
   7-day disk cache (`data/fundamentals_cache.json`) to avoid rate-limiting.
 - `src/backtest.py` — daily-mark-to-market vector backtest. Metrics MUST be
   annualised from daily returns (`×252` / `×√252`), never from the monthly
-  rebalance series — that bug previously inflated Sharpe ~4.6×.
+  rebalance series — that bug previously inflated Sharpe ~4.6×. `_apply_sector_cap`
+  caps any sector at 40% of gross long exposure but PRESERVES the original gross
+  (must renormalise to gross, never 1.0, or it undoes the risk_off 0.5 brake).
 - `src/report.py` — static charts + markdown report for the CLI path.
 - `dashboard.py` — Danelfin-style screener UI. Five tabs:
   SCREENER (primary): `st.column_config.ProgressColumn` for AI Score and
@@ -114,11 +125,37 @@ cd frontend && npm install && npm run dev  # terminal 2 — http://localhost:300
 2. **The LONG entry filter must not be self-contradictory.** "Near 52-week
    high" AND "RSI ≤ 30 (oversold)" almost never co-occur — that produced ~2
    trades in 11 years. Current rule: positive 12m momentum + within 30% of
-   52w high + RSI in a 25–55 *pullback* band (not a crash). If changing entry
+   52w high + RSI in a 30–50 *pullback* band (not a crash). If changing entry
    logic, sanity-check trade count stays in the dozens-to-hundreds range over
    a 10-year backtest, not single digits.
 3. **Annualise from daily data, not monthly.** The equity curve must be
    marked to market daily before computing Sharpe/vol/drawdown.
+
+## Academic strategy features (opt-in, all default OFF)
+
+Six research-paper features are implemented as config flags, all defaulting
+to their behaviour-preserving value so the default backtest is unchanged:
+- CS1 vol targeting (Barroso & Santa-Clara) — `PortfolioConfig.use_vol_targeting`
+- CS2 crash-risk filter (Daniel & Moskowitz) — `PortfolioConfig.use_crash_risk_filter`
+- CS3 residual momentum (Blitz/Huij/Martens) — `MomentumConfig.use_residual_momentum`
+- CS4 purged walk-forward (Lopez de Prado) — always on for reporting only
+  (`_purged_walk_forward`; old `_walk_forward_legacy` kept). Emits both new
+  keys and legacy aliases so the dashboard/report/web UI need no changes.
+- CS5 momentum-quality gate (Gray & Vogel) — `SignalConfig.momentum_quality_min`
+- CS6 consistent momentum (Chen/Chou/Hsieh) — `SignalConfig.require_consistent_momentum`
+
+**A/B result (2016–2026, current 132-name universe, momentum-only): none
+beat the baseline on Sharpe.** Baseline (all off) = CAGR 24.9% / Sharpe 1.248
+/ MaxDD -23%. Vol targeting best case Sharpe 1.151 at an 18% target (12% is
+far too low for a long-only book and de-levers to ~15% CAGR; above ~19% it
+becomes a 2x leverage dial, not a brake — and it is redundant with the
+existing vol-spike regime override). Residual momentum HURT (Sharpe 0.97 —
+the free size/no-HML proxy can't reproduce the paper's FF3 result). Crash
+filter was inert (its bear+rebound trigger never fired in this bull period).
+Quality gate and consistent momentum were mild drags. Kept all OFF. These
+papers were validated on long-short factor portfolios, broad universes, real
+bear markets and full FF3 factors — conditions this test doesn't reproduce.
+Revisit on a survivorship-free universe (see load_point_in_time_universe).
 
 ## Project agents
 

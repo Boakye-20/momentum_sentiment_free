@@ -18,3 +18,12 @@ outputs/*.log
 
 # local runtime logs
 api-server.log
+prod-server.log
+frontend/dev-server.log
+
+# reference PDFs + personal scratch (kept local, never committed)
+books/
+SOP Memory
+edits
+transcript
+transcript *

@@ -132,13 +132,17 @@ class MomentumConfig:
     rsi_period: int = 14
     vol_lookback: int = 63           # realised-vol window for position sizing
     short_ma: int = 20
-    long_ma: int = 150               # long-trend filter MA
+    long_ma: int = 200               # long-trend filter MA (200d = institutional standard)
     breadth_ma: int = 200            # MA used for market-breadth regime
     # Market-regime detector: "breadth" (fraction of universe above its long
     # MA — free, simple, default) or "hmm" (3-state Gaussian HMM on market
     # return/vol/dispersion, walk-forward refit — needs `pip install hmmlearn`,
     # falls back to breadth if unavailable). See src/regime.py.
     regime_method: str = "breadth"
+    # CHANGE SET 3 (Blitz/Huij/Martens 2011, Residual Momentum). When True,
+    # rank on factor-residual momentum instead of raw TSM. Default False =
+    # existing behaviour (spec suggests enabling; kept off for reproducibility).
+    use_residual_momentum: bool = False
 
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -171,11 +175,11 @@ class SentimentConfig:
 @dataclass
 class SignalConfig:
     # ---- LONG gate (a pullback *within* an uptrend; NOT "at the high & oversold") ----
-    trend_tsm_min: float = 0.0          # 12m return must be > 0  (winner)
-    near_floor_52w: float = 0.70        # within 30% of 52w high  (real uptrend)
+    trend_tsm_min: float = 0.05         # 12m return > 5% (a real winner, not barely positive)
+    near_floor_52w: float = 0.75        # within 25% of 52w high  (tighter uptrend)
     require_above_long_ma: bool = True  # close > long_ma         (trend confirmation)
-    rsi_pullback_max: float = 55.0      # RSI below this = a dip we can buy ...
-    rsi_pullback_min: float = 25.0      # ... but above this, so we don't catch crashes
+    rsi_pullback_max: float = 50.0      # RSI below this = a dip we can buy ...
+    rsi_pullback_min: float = 30.0      # ... but above this, so we don't catch crashes
     long_sentiment_min: float = 0.0     # news score must be >= this for a LONG
 
     # ---- SHORT gate (optional; off by default for a free, long-biased model) ----
@@ -186,7 +190,20 @@ class SignalConfig:
     short_sentiment_max: float = -0.05
 
     # ---- Ranking when there are more candidates than slots ----
-    rank_sentiment_weight: float = 0.5  # blend momentum strength with sentiment
+    rank_sentiment_weight: float = 0.3  # momentum leads, noisy free sentiment confirms
+
+    # ---- CHANGE SET 5 (Gray & Vogel 2016, Quantitative Momentum) ----
+    # "Path of momentum" quality gate: min fraction of positive monthly returns
+    # over the formation window. Spec suggests 0.55; default 0.0 = no filtering
+    # (preserves existing behaviour per the final-instruction reproducibility rule).
+    momentum_quality_min: float = 0.0
+
+    # ---- CHANGE SET 6 (Chen/Chou/Hsieh, Consistent Momentum) ----
+    # Require this rebalance's longs to be either held last rebalance too
+    # (consistent winners) or fresh names in the top X% by momentum. Spec
+    # suggests True; default False preserves existing behaviour.
+    require_consistent_momentum: bool = False
+    consistent_momentum_top_pct: float = 0.30
 
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -195,17 +212,28 @@ class SignalConfig:
 @dataclass
 class PortfolioConfig:
     initial_capital: float = 100_000.0
-    max_positions: int = 10
+    max_positions: int = 15              # 15 (was 10) spreads single-name risk
     max_gross_short: float = 0.30        # 30% gross short cap
     rebalance: str = "M"                 # monthly
     use_inverse_vol_weights: bool = True # size longs ~ 1/realised vol (else equal)
     transaction_cost_bps: float = 10.0   # 10 bps per unit turnover
     execution_delay_days: int = 1        # T+1 (no look-ahead)
     use_breadth_regime: bool = True      # scale exposure with market breadth
+    # CHANGE SET 1 (Barroso & Santa-Clara 2015, Momentum Has Its Moments):
+    # portfolio-level volatility targeting. Spec suggests True; defaults False
+    # per the final-instruction rule that defaults preserve existing behaviour.
+    use_vol_targeting: bool = False
+    vol_target_pct: float = 12.0         # annualised vol target when enabled
+    # CHANGE SET 2 (Daniel & Moskowitz 2016, Momentum Crashes): cap long gross
+    # at 0.3 when crash risk is elevated (bear market + rebound beginning).
+    use_crash_risk_filter: bool = False
 
 
 @dataclass
 class BacktestConfig:
+    # CHANGE SET 4 (Lopez de Prado 2018, ch.7): purged walk-forward folds.
+    wf_n_folds: int = 6
+    wf_embargo_days: int = 10
     in_sample_years: int = 5
     out_sample_years: int = 1
     min_history_days: int = 260

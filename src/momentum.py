@@ -25,6 +25,78 @@ def tsm(prices: pd.DataFrame, lookback: int | None = None,
     return recent / prices.shift(lookback) - 1
 
 
+def residual_tsm(prices: pd.DataFrame, benchmark: pd.Series,
+                 lookback: int | None = None, skip: int | None = None,
+                 refit_every: int = 5) -> pd.DataFrame:
+    """Blitz, Huij & Martens (2011), "Residual Momentum". Ranking on the
+    residual of a factor regression instead of raw returns strips out market
+    beta and size exposure, roughly doubling momentum's Sharpe with smaller
+    crashes because the factor bets (not the stock-picking) drive the tails.
+
+    Per the paper, the score is the 12-1 window residual return STANDARDISED
+    by its own standard deviation over the same window (an information ratio
+    of residuals) — the prompt's raw "sum of residuals" is kept as the
+    numerator, with the paper's standardisation as the denominator.
+    Regressors: market (SPY daily return) and a size proxy (equal-weight
+    universe return minus SPY). A value/HML proxy would be a static 0.0
+    series on free data (no daily HML factor), which is rank-deficient in
+    OLS, so it is intentionally omitted — noted per the prompt.
+    Uses numpy lstsq (no statsmodels dependency); refits every `refit_every`
+    days for tractability since betas move slowly and the signal is only read
+    at monthly rebalances.
+    """
+    lookback = lookback or CFG.momentum.tsm_lookback
+    skip = CFG.momentum.tsm_skip if skip is None else skip
+
+    rets = prices.pct_change()
+    mkt = benchmark.reindex(prices.index).pct_change()
+    size = rets.mean(axis=1) - mkt              # equal-weight universe minus SPY
+    X_all = np.column_stack([np.ones(len(prices)), mkt.values, size.values])
+
+    out = pd.DataFrame(np.nan, index=prices.index, columns=prices.columns)
+    for t in prices.columns:
+        y_all = rets[t].values
+        col = np.full(len(prices), np.nan)
+        for i in range(lookback, len(prices), refit_every):
+            y = y_all[i - lookback + 1: i + 1]
+            X = X_all[i - lookback + 1: i + 1]
+            ok = np.isfinite(y) & np.isfinite(X).all(axis=1)
+            if ok.sum() < int(lookback * 0.8):
+                continue
+            coef, *_ = np.linalg.lstsq(X[ok], y[ok], rcond=None)
+            resid = y[ok] - X[ok] @ coef
+            window = resid[:-skip] if skip > 0 else resid
+            sd = window.std()
+            if sd > 0:
+                col[i] = window.sum() / (sd * np.sqrt(len(window)))
+        out[t] = pd.Series(col, index=prices.index).ffill(limit=refit_every)
+    return out
+
+
+def momentum_quality(prices: pd.DataFrame, lookback: int | None = None,
+                     skip: int | None = None) -> pd.DataFrame:
+    """Gray & Vogel (2016), "Quantitative Momentum" — the path-of-momentum
+    quality filter (their "frog in the pan" idea): smooth momentum built from
+    many small positive months persists, while the same total return earned in
+    one giant month tends to revert. Returns the fraction (0..1) of the ~11
+    monthly returns in the 12-1 formation window that were positive, per the
+    prompt's monthly formulation.
+    """
+    lookback = lookback or CFG.momentum.tsm_lookback
+    skip = CFG.momentum.tsm_skip if skip is None else skip
+    n_months = max(1, (lookback - skip) // 21)
+    base = prices.shift(skip) if skip > 0 else prices
+
+    pos_sum = pd.DataFrame(0.0, index=prices.index, columns=prices.columns)
+    valid = pd.DataFrame(0, index=prices.index, columns=prices.columns)
+    for k in range(n_months):
+        r = base.shift(21 * k) / base.shift(21 * (k + 1)) - 1
+        pos_sum += (r > 0).astype(float)
+        valid += r.notna().astype(int)
+    frac = pos_sum / valid.replace(0, np.nan)
+    return frac.where(valid == n_months)   # need the full formation window
+
+
 def ratio_52w(prices: pd.DataFrame, window: int | None = None) -> pd.DataFrame:
     """price / rolling max  -> proximity to the 52-week high (0..1+)."""
     window = window or CFG.momentum.high_52w_window
@@ -71,21 +143,33 @@ def macd_hist(prices: pd.DataFrame, fast: int = 12, slow: int = 26,
 def breadth_regime(
     prices: pd.DataFrame,
     ma_window: int | None = None,
-    risk_on: float = 0.60,
-    risk_off: float = 0.40,
+    risk_on: float = 0.65,
+    risk_off: float = 0.45,
 ) -> pd.Series:
     """
     Free, historical market-regime proxy: the fraction of the universe trading
     above its long MA. >risk_on -> 'risk_on', <risk_off -> 'risk_off', else
     'neutral'. Used to scale exposure in the backtest (no sentiment needed).
+
+    Breadth deteriorates slowly (weeks) at the start of a crash, but realised
+    volatility spikes immediately, so a cross-sectional vol-spike detector is
+    layered on top: if the universe's average 20-day realised vol jumps above
+    2.5x its own trailing-year median, force risk_off regardless of breadth.
+    This catches events like March 2020 far earlier.
     """
     ma_window = ma_window or CFG.momentum.breadth_ma
     ma = moving_average(prices, ma_window)
     above = (prices > ma)
     frac = above.sum(axis=1) / above.notna().sum(axis=1).replace(0, np.nan)
+
+    rv_20 = prices.pct_change().rolling(20).std().mean(axis=1)
+    rv_baseline = rv_20.rolling(252, min_periods=60).median()
+    vol_spike = (rv_20 > rv_baseline * 2.5).fillna(False)
+
     regime = pd.Series("neutral", index=prices.index, name="regime")
     regime[frac >= risk_on] = "risk_on"
     regime[frac <= risk_off] = "risk_off"
+    regime[vol_spike] = "risk_off"        # vol spike overrides breadth
     return regime
 
 
@@ -156,13 +240,17 @@ def build_technicals(prices: pd.DataFrame) -> dict[str, pd.DataFrame]:
             for name, d in cols.items()}
 
 
-def build_panels(prices: pd.DataFrame) -> dict[str, pd.DataFrame]:
+def build_panels(prices: pd.DataFrame,
+                 benchmark: pd.Series | None = None) -> dict[str, pd.DataFrame]:
     """
     Compute every momentum panel once, return a dict of wide frames.
 
     Core keys (always present, stable API — do not rename):
       tsm, ratio52, rsi, ma_long, ma_short, vol, above_long_ma, regime,
-      macd_hist (price-normalised MACD histogram, pure pandas)
+      macd_hist, momentum_quality, crash_risk, residual_tsm
+    `benchmark` (SPY prices) is optional to keep old call sites working:
+    without it, crash_risk defaults to "normal" everywhere and residual_tsm
+    falls back to the plain tsm panel.
     Optional keys (present only when pandas-ta is installed):
       MACD_12_26_9, BBP_5_2.0, ATRr_14, STOCHk_14_3_3, OBV, MOM_10
     """
@@ -176,16 +264,36 @@ def build_panels(prices: pd.DataFrame) -> dict[str, pd.DataFrame]:
         except Exception as e:
             print(f"[momentum] HMM regime unavailable ({e}) — using breadth.")
 
+    tsm_panel = tsm(prices)
+
+    # CHANGE SET 2 (Daniel & Moskowitz): crash-risk flag needs the benchmark.
+    if benchmark is not None:
+        from src.regime import daniel_moskowitz_crash_risk
+        crash_risk = daniel_moskowitz_crash_risk(benchmark)
+    else:
+        crash_risk = pd.Series("normal", index=prices.index, name="crash_risk")
+
+    # CHANGE SET 3 (Blitz/Huij/Martens): residual momentum. Only computed when
+    # opted in (it is the one expensive panel — a rolling lstsq per ticker);
+    # otherwise it falls back to plain tsm so the key is always present.
+    if benchmark is not None and getattr(CFG.momentum, "use_residual_momentum", False):
+        residual = residual_tsm(prices, benchmark)
+    else:
+        residual = tsm_panel
+
     panels: dict[str, pd.DataFrame] = {
-        "tsm":           tsm(prices),
-        "ratio52":       ratio_52w(prices),
-        "rsi":           rsi(prices),
-        "ma_long":       ma_long,
-        "ma_short":      moving_average(prices, CFG.momentum.short_ma),
-        "vol":           realised_vol(prices),
-        "above_long_ma": prices > ma_long,
-        "regime":        regime,
-        "macd_hist":     macd_hist(prices),
+        "tsm":              tsm_panel,
+        "ratio52":          ratio_52w(prices),
+        "rsi":              rsi(prices),
+        "ma_long":          ma_long,
+        "ma_short":         moving_average(prices, CFG.momentum.short_ma),
+        "vol":              realised_vol(prices),
+        "above_long_ma":    prices > ma_long,
+        "regime":           regime,
+        "macd_hist":        macd_hist(prices),
+        "momentum_quality": momentum_quality(prices),   # CHANGE SET 5
+        "crash_risk":       crash_risk,
+        "residual_tsm":     residual,
     }
     try:
         panels.update(build_technicals(prices))

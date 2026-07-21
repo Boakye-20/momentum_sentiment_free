@@ -1,0 +1,6 @@
+ticker,added_date,removed_date,removal_reason
+AAPL,1982-11-30,,
+MSFT,1994-06-01,,
+JNJ,1973-06-30,,
+NVDA,2001-11-30,,
+BBBY,1996-01-01,2019-01-02,dropped_from_index
