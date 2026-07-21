@@ -254,11 +254,9 @@ export default function DataModelPage() {
             stable backbone with the deepest data history.
           </Row>
           <Row term="Quality Value">
-            Around 37 excellent but under-covered businesses: high returns on
+            Around 32 excellent but under-covered businesses: high returns on
             capital, sensible prices, little media attention (McKesson, AutoZone,
-            Chubb, homebuilders), including five cheap European quality names held
-            via US ADRs (Roche, Nestle, Danone, KPN, DHL) that lead the Top Value
-            view but carry thin news-sentiment coverage.
+            Chubb, homebuilders).
           </Row>
           <Row term="Niche Growth">
             Around 22 liquid mid-cap growth names with real revenue (CrowdStrike,
@@ -266,8 +264,10 @@ export default function DataModelPage() {
             excluded.
           </Row>
           <Row term="Global">
-            Around 20 international leaders held via their US listings (ASML,
-            Novo Nordisk, TSMC, Toyota), so all data sources keep working.
+            Around 25 international leaders held via their US listings (ASML,
+            Novo Nordisk, TSMC, Toyota), plus five cheap European quality names
+            from the Lightman funds (Roche, Nestle, Danone, KPN, DHL) that lead
+            the Top Value view. Held as ADRs so the data sources keep working.
           </Row>
         </div>
       </Section>

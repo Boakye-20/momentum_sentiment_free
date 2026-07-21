@@ -6,11 +6,11 @@ Project memory for Claude Code. Read this before making changes.
 
 A momentum + sentiment trading research tool for ~137 global stocks in four
 sleeves (`config.SLEEVES`): core (US large caps, all with banked AV history),
-quality_value (underrated high-ROE/cheap compounders, incl. 5 Lightman-style
-European value names via OTC ADRs — Roche/Nestle/Danone/KPN/DHL, thin AV
-sentiment so they lean on fundamentals), niche_growth (liquid
+quality_value (underrated high-ROE/cheap compounders), niche_growth (liquid
 mid-cap growth), global (ex-US via US-listed ADRs ONLY — native .L/.T/.DE
-listings break AV sentiment + fundamentals, and LSE quotes are in pence).
+listings break AV sentiment + fundamentals, and LSE quotes are in pence;
+includes 5 Lightman-style European value names via OTC ADRs —
+Roche/Nestle/Danone/KPN/DHL, cheap + high-ROE but thin AV sentiment).
 Sector map in `config.SECTORS`; sleeve map in `config.TICKER_SLEEVE`.
 100% free data: yfinance (prices), RSS + yfinance news + VADER (live sentiment),
 Alpha Vantage NEWS_SENTIMENT (historical sentiment, free key, ~2022+).

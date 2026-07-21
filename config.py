@@ -59,9 +59,6 @@ SLEEVE_QUALITY_VALUE: List[str] = [
     "DHI", "LEN", "PHM", "TOL",
     # ── Consumer quality ───────────────────────────────────────────────────
     "DECK", "WSM",
-    # ── European value (Lightman-style; OTC ADRs, cheap + high ROE, but
-    #    thin Alpha Vantage sentiment coverage — lean on fundamentals) ──────
-    "RHHBY", "NSRGY", "DANOY", "KKPNY", "DHLGY",
 ]
 
 # Moderate niche growth: liquid, profitable (or near it), covered-but-not-
@@ -80,6 +77,9 @@ SLEEVE_GLOBAL: List[str] = [
     # ── Europe ─────────────────────────────────────────────────────────────
     "ASML", "SAP", "NVO", "AZN", "GSK", "SNY", "SHEL", "BP", "TTE", "UL",
     "RIO",
+    # European value (Lightman holdings) via OTC ADRs — cheap + high ROE, but
+    # thin Alpha Vantage sentiment coverage, so they lean on fundamentals.
+    "RHHBY", "NSRGY", "DANOY", "KKPNY", "DHLGY",
     # ── Asia ───────────────────────────────────────────────────────────────
     "TSM", "SONY", "TM", "BABA", "INFY", "BHP",
     # ── Latin America ──────────────────────────────────────────────────────
