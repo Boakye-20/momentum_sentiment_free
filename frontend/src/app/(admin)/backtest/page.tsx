@@ -60,15 +60,35 @@ export default function BacktestPage() {
   }, [sentiment, poll]);
 
   const m = data?.metrics;
+  const eq = data?.equity;
+  // Datetime series so the x-axis always spans the real date range and the
+  // right edge lands on the most recent date (a category axis with even ticks
+  // left the last label at ~2025-09 even though data ran to 2026-07).
+  const dates = eq?.dates ?? [];
+  const toSeries = (vals: number[] = []) =>
+    dates.map((d, i) => ({ x: new Date(d).getTime(), y: vals[i] }));
+  const firstTs = dates.length ? new Date(dates[0]).getTime() : undefined;
+  const lastTs = dates.length ? new Date(dates[dates.length - 1]).getTime() : undefined;
+
+  const stratUp = (eq?.strategy?.length ?? 0) > 1
+    && eq!.strategy[eq!.strategy.length - 1] >= eq!.strategy[0];
   const chartOptions: ApexOptions = {
-    chart: { type: "line", fontFamily: "Inter, sans-serif", toolbar: { show: false } },
-    colors: ["#465FFF", "#98A2B3"],
+    chart: { type: "area", fontFamily: "Inter, sans-serif", toolbar: { show: false }, animations: { enabled: false } },
+    colors: [stratUp ? "#22C55E" : "#EF4444", "#98A2B3"],
     stroke: { curve: "straight", width: [2, 1.5], dashArray: [0, 4] },
+    fill: { type: ["gradient", "solid"], opacity: [1, 0], gradient: { opacityFrom: 0.28, opacityTo: 0, stops: [0, 100] } },
     dataLabels: { enabled: false },
     xaxis: {
-      categories: data?.equity?.dates ?? [],
-      tickAmount: 10,
-      labels: { rotate: 0, style: { colors: "#98A2B3" } },
+      type: "datetime",
+      min: firstTs,
+      max: lastTs,
+      tickAmount: 8,
+      labels: {
+        rotate: 0,
+        datetimeUTC: false,
+        format: "MMM yyyy",
+        style: { colors: "#98A2B3" },
+      },
       axisTicks: { show: false },
     },
     yaxis: {
@@ -79,7 +99,10 @@ export default function BacktestPage() {
     },
     grid: { borderColor: "rgba(152,162,179,0.15)" },
     legend: { labels: { colors: "#98A2B3" } },
-    tooltip: { y: { formatter: (v: number) => v.toLocaleString(undefined, { maximumFractionDigits: 0 }) } },
+    tooltip: {
+      x: { format: "dd MMM yyyy" },
+      y: { formatter: (v: number) => v.toLocaleString(undefined, { maximumFractionDigits: 0 }) },
+    },
   };
 
   return (
@@ -90,7 +113,7 @@ export default function BacktestPage() {
             Backtest
           </h1>
           <p className="text-sm text-gray-500 dark:text-gray-400">
-            Monthly rebalance, top 10 by momentum, T+1 execution, 0.1% costs, marked to market daily
+            Monthly rebalance, up to 15 positions by momentum, T+1 execution, 0.1% costs, marked to market daily
           </p>
         </div>
         <label className="flex cursor-pointer items-center gap-2 text-sm text-gray-600 dark:text-gray-300">
@@ -143,10 +166,10 @@ export default function BacktestPage() {
             <ReactApexChart
               options={chartOptions}
               series={[
-                { name: "Strategy", data: data.equity?.strategy ?? [] },
-                { name: "SPY benchmark", data: data.equity?.benchmark ?? [] },
+                { name: "Strategy", data: toSeries(eq?.strategy) },
+                { name: "SPY benchmark", data: toSeries(eq?.benchmark) },
               ]}
-              type="line"
+              type="area"
               height={340}
             />
           </div>
@@ -165,8 +188,10 @@ export default function BacktestPage() {
                   Walk-forward check
                 </h2>
                 <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
-                  Each row: 5 years in-sample, then 1 unseen year. If out-of-sample
-                  CAGR holds up, the strategy is not just fitted to the past.
+                  Purged cross-validation: the history is split into equal folds,
+                  each scored out-of-sample with an embargo around its boundary.
+                  If out-of-sample CAGR holds up across folds, the strategy is not
+                  just fitted to one era.
                 </p>
               </div>
               <div className="max-w-full overflow-x-auto">
@@ -176,7 +201,7 @@ export default function BacktestPage() {
                       <th className="px-5 py-3">Window</th>
                       <th className="px-5 py-3">In-sample CAGR</th>
                       <th className="px-5 py-3">Out-of-sample CAGR</th>
-                      <th className="px-5 py-3">Benchmark (same year)</th>
+                      <th className="px-5 py-3">Benchmark (same period)</th>
                     </tr>
                   </thead>
                   <tbody>

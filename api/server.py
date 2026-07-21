@@ -186,7 +186,7 @@ def stock(ticker: str):
         raise HTTPException(404, f"{t} not in universe")
     px = _cache["px"]
     row = {k: _clean(v) for k, v in df.loc[t].items() if k != "price_trend"}
-    series = px[t].dropna().tail(504)  # ~2y
+    series = px[t].dropna()  # full available history (cache back to 2015 / IPO)
     row.update(
         ticker=t, as_of=as_of,
         prices={"dates": [str(d.date()) for d in series.index],

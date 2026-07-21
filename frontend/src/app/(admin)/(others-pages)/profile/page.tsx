@@ -187,7 +187,7 @@ export default function DataModelPage() {
           </Row>
           <Row term="Other indicators">
             RSI uses 14 days (the industry standard), the trend filter uses a
-            150-day average, and volatility uses the last 3 months of daily moves.
+            200-day average, and volatility uses the last 3 months of daily moves.
           </Row>
         </div>
       </Section>

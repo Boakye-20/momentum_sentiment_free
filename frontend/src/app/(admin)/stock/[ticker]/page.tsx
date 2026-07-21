@@ -2,14 +2,11 @@
 import React, { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
-import dynamic from "next/dynamic";
-import type { ApexOptions } from "apexcharts";
 import Badge from "@/components/ui/badge/Badge";
 import ScoreBar from "@/components/screener/ScoreBar";
 import RadarTag from "@/components/screener/RadarTag";
+import PriceChart from "@/components/screener/PriceChart";
 import { fetchStock, fmtPct, fmtNum, sleeveLabel, StockDetail } from "@/lib/api";
-
-const ReactApexChart = dynamic(() => import("react-apexcharts"), { ssr: false });
 
 function Stat({ label, value }: { label: string; value: string }) {
   return (
@@ -31,23 +28,6 @@ export default function StockPage() {
 
   if (err) return <p className="p-8 text-error-500">{err}</p>;
   if (!d) return <p className="p-8 text-gray-500">Loading…</p>;
-
-  const options: ApexOptions = {
-    chart: { type: "area", fontFamily: "Inter, sans-serif", toolbar: { show: false } },
-    colors: ["#465FFF"],
-    stroke: { curve: "smooth", width: 2 },
-    fill: { type: "gradient", gradient: { opacityFrom: 0.35, opacityTo: 0 } },
-    dataLabels: { enabled: false },
-    xaxis: {
-      categories: d.prices.dates,
-      tickAmount: 8,
-      labels: { rotate: 0, style: { colors: "#98A2B3" } },
-      axisTicks: { show: false },
-    },
-    yaxis: { labels: { style: { colors: "#98A2B3" } } },
-    grid: { borderColor: "rgba(152,162,179,0.15)" },
-    tooltip: { x: { show: true } },
-  };
 
   const badgeColor =
     d.action === "BUY" ? "success" : d.action === "AVOID" ? "error" : "warning";
@@ -87,12 +67,7 @@ export default function StockPage() {
               {fmtPct(d.mom_12m)} over 12m
             </p>
           </div>
-          <ReactApexChart
-            options={options}
-            series={[{ name: d.ticker, data: d.prices.close }]}
-            type="area"
-            height={320}
-          />
+          <PriceChart dates={d.prices.dates} values={d.prices.close} height={320} />
         </div>
 
         <div className="col-span-12 space-y-4 xl:col-span-4">
