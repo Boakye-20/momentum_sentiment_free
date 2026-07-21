@@ -254,9 +254,11 @@ export default function DataModelPage() {
             stable backbone with the deepest data history.
           </Row>
           <Row term="Quality Value">
-            Around 32 excellent but under-covered businesses: high returns on
+            Around 37 excellent but under-covered businesses: high returns on
             capital, sensible prices, little media attention (McKesson, AutoZone,
-            Chubb, homebuilders).
+            Chubb, homebuilders), including five cheap European quality names held
+            via US ADRs (Roche, Nestle, Danone, KPN, DHL) that lead the Top Value
+            view but carry thin news-sentiment coverage.
           </Row>
           <Row term="Niche Growth">
             Around 22 liquid mid-cap growth names with real revenue (CrowdStrike,

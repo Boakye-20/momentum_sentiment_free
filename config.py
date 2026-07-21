@@ -59,6 +59,9 @@ SLEEVE_QUALITY_VALUE: List[str] = [
     "DHI", "LEN", "PHM", "TOL",
     # ── Consumer quality ───────────────────────────────────────────────────
     "DECK", "WSM",
+    # ── European value (Lightman-style; OTC ADRs, cheap + high ROE, but
+    #    thin Alpha Vantage sentiment coverage — lean on fundamentals) ──────
+    "RHHBY", "NSRGY", "DANOY", "KKPNY", "DHLGY",
 ]
 
 # Moderate niche growth: liquid, profitable (or near it), covered-but-not-
@@ -277,15 +280,16 @@ SECTORS: Dict[str, str] = {
         "SCHW", "TRV", "CB", "AFL", "ALL", "MET"]},
     **{t: "Healthcare" for t in [
         "JNJ", "MRK", "UNH", "LLY", "ABBV", "AMGN", "BMY", "GILD", "VRTX",
-        "MCK", "COR", "CAH", "CI", "ELV"]},
+        "MCK", "COR", "CAH", "CI", "ELV", "RHHBY"]},
     **{t: "Consumer" for t in [
         "HD", "MCD", "KO", "PG", "WMT", "NKE", "DIS", "COST", "CMG", "LULU",
-        "AZO", "ORLY", "CASY", "TXRH", "MUSA", "DECK", "WSM"]},
+        "AZO", "ORLY", "CASY", "TXRH", "MUSA", "DECK", "WSM",
+        "NSRGY", "DANOY"]},
     **{t: "Energy" for t in ["CVX", "XOM", "COP", "EOG"]},
     **{t: "Industrials" for t in [
         "CAT", "HON", "GE", "BA", "RTX", "LMT", "DE", "VZ",
         "GWW", "FAST", "WSO", "EME", "FIX", "LECO",
-        "DHI", "LEN", "PHM", "TOL"]},
+        "DHI", "LEN", "PHM", "TOL", "KKPNY", "DHLGY"]},
     **{t: "Semis" for t in [
         "KLAC", "AMAT", "LRCX", "MRVL", "NXPI", "MU", "ON", "SWKS",
         "ASML", "TSM"]},
@@ -348,6 +352,8 @@ TICKER_NAMES: Dict[str, str] = {
     "TSM": "TSMC", "SONY": "Sony", "TM": "Toyota", "BABA": "Alibaba",
     "INFY": "Infosys", "BHP": "BHP Group",
     "MELI": "MercadoLibre", "NU": "Nu Holdings", "VALE": "Vale",
+    "RHHBY": "Roche", "NSRGY": "Nestle", "DANOY": "Danone",
+    "KKPNY": "KPN", "DHLGY": "DHL Group",
 }
 
 # Ticker -> name variants used to attribute free headlines to a stock.
@@ -493,4 +499,10 @@ COMPANY_KEYWORDS: Dict[str, List[str]] = {
     "MELI":  ["mercadolibre", "mercado libre"],
     "NU":    ["nubank", "nu holdings"],
     "VALE":  ["vale s.a.", "vale sa", "vale mining"],
+    # ── European value (Lightman holdings, OTC ADRs) ────────────────────────────
+    "RHHBY": ["roche", "roche holding", "genentech"],
+    "NSRGY": ["nestle", "nestle sa"],
+    "DANOY": ["danone"],
+    "KKPNY": ["kpn", "koninklijke kpn"],
+    "DHLGY": ["dhl group", "deutsche post", "dhl express"],
 }

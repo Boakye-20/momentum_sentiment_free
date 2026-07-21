@@ -4,9 +4,11 @@ Project memory for Claude Code. Read this before making changes.
 
 ## What this is
 
-A momentum + sentiment trading research tool for ~132 global stocks in four
+A momentum + sentiment trading research tool for ~137 global stocks in four
 sleeves (`config.SLEEVES`): core (US large caps, all with banked AV history),
-quality_value (underrated high-ROE/cheap compounders), niche_growth (liquid
+quality_value (underrated high-ROE/cheap compounders, incl. 5 Lightman-style
+European value names via OTC ADRs — Roche/Nestle/Danone/KPN/DHL, thin AV
+sentiment so they lean on fundamentals), niche_growth (liquid
 mid-cap growth), global (ex-US via US-listed ADRs ONLY — native .L/.T/.DE
 listings break AV sentiment + fundamentals, and LSE quotes are in pence).
 Sector map in `config.SECTORS`; sleeve map in `config.TICKER_SLEEVE`.
@@ -144,9 +146,10 @@ to their behaviour-preserving value so the default backtest is unchanged:
 - CS5 momentum-quality gate (Gray & Vogel) — `SignalConfig.momentum_quality_min`
 - CS6 consistent momentum (Chen/Chou/Hsieh) — `SignalConfig.require_consistent_momentum`
 
-**A/B result (2016–2026, current 132-name universe, momentum-only): none
-beat the baseline on Sharpe.** Baseline (all off) = CAGR 24.9% / Sharpe 1.248
-/ MaxDD -23%. Vol targeting best case Sharpe 1.151 at an 18% target (12% is
+**A/B result (2016–2026, momentum-only): none beat the baseline on Sharpe.**
+Baseline (all off), 137-name universe = CAGR 22.8% / Sharpe 1.211 / MaxDD
+-23% (was 24.9% / 1.248 on 132 names before the 5 European value adds — those
+value names cost ~2pp CAGR as expected drag on a momentum book). Vol targeting best case Sharpe 1.151 at an 18% target (12% is
 far too low for a long-only book and de-levers to ~15% CAGR; above ~19% it
 becomes a 2x leverage dial, not a brake — and it is redundant with the
 existing vol-spike regime override). Residual momentum HURT (Sharpe 0.97 —
