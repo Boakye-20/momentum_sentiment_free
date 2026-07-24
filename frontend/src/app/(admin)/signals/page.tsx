@@ -90,13 +90,12 @@ export default function SignalsPage() {
           </div>
 
           <div className="mb-4 rounded-xl border border-brand-200 bg-brand-50 px-4 py-3 text-sm text-brand-700 dark:border-brand-500/30 dark:bg-brand-500/10 dark:text-brand-300">
-            <strong>How to place these trades:</strong> use the{" "}
+            <strong>How to place these trades:</strong> enter the{" "}
             <strong>Suggested alloc (£)</strong> column as a value-based order
-            in Trading212, not the Shares column. Shares is only illustrative:
-            it divides £ allocation by a USD price with no FX conversion, and
-            the live price will have moved slightly by the time you trade. A
-            value-based order lets T212 work out the share count and FX at
-            execution, so it always matches.
+            in Trading212. A share count would drift from the live execution
+            price and ignore FX, so a value-based order is the only figure
+            here that always matches: T212 works out the share count and FX
+            for you at execution.
           </div>
 
           {data.positions.length === 0 ? (
@@ -115,7 +114,6 @@ export default function SignalsPage() {
                       <th className="px-5 py-3">Weight</th>
                       <th className="px-5 py-3">Price</th>
                       <th className="px-5 py-3">Suggested alloc (£)</th>
-                      <th className="px-5 py-3 text-gray-400">Shares (illustrative)</th>
                       <th className="px-5 py-3">12m mom</th>
                       <th className="px-5 py-3">RSI</th>
                       <th className="px-5 py-3">Sentiment</th>
@@ -156,7 +154,6 @@ export default function SignalsPage() {
                         <td className="px-5 py-3 font-medium text-gray-800 dark:text-white/90">
                           £{p.alloc_gbp.toLocaleString(undefined, { maximumFractionDigits: 0 })}
                         </td>
-                        <td className="px-5 py-3 text-gray-400">{p.suggested_shares}</td>
                         <td
                           className={`px-5 py-3 ${
                             (p.mom_12m ?? 0) >= 0 ? "text-success-600" : "text-error-500"
