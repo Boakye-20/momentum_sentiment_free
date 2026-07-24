@@ -1,24 +1,24 @@
 import type { Metadata } from "next";
 import React from "react";
-import ScreenerDashboard from "@/components/screener/ScreenerDashboard";
+import BrowseUniverse from "@/components/screener/BrowseUniverse";
 
 export const metadata: Metadata = {
-  title: "AI Stock Screener",
-  description: "Momentum, sentiment and fundamentals screener with composite AI Scores (1-10)",
+  title: "Browse",
+  description: "Browse the universe of stocks you don't currently hold, grouped by sleeve",
 };
 
-export default function ScreenerPage() {
+export default function BrowsePage() {
   return (
     <div>
       <div className="mb-6">
         <h1 className="text-xl font-semibold tracking-tight text-gray-900 dark:text-white/90">
-          Screener
+          Browse
         </h1>
         <p className="text-sm text-gray-500 dark:text-gray-400">
-          Ranked by composite AI Score: technicals, news sentiment and fundamentals
+          Stocks you don&apos;t currently hold, grouped by sleeve. Click through for the full chart.
         </p>
       </div>
-      <ScreenerDashboard />
+      <BrowseUniverse />
     </div>
   );
 }

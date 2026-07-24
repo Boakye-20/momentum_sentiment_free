@@ -11,7 +11,7 @@ export const metadata: Metadata = {
     template: "%s | Stock Picker AI",
   },
   description:
-    "Momentum + sentiment + fundamentals screener. Research tool, not investment advice.",
+    "Momentum + sentiment + fundamentals research tool with a backtested Signal Book. Not investment advice.",
   // Served statically from /public so Next 16's metadata image loader (which
   // crashes on some SVGs) never touches it.
   icons: { icon: "/icon.svg" },

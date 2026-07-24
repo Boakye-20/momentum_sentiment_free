@@ -21,10 +21,18 @@ export default function PriceChart({
   dates,
   values,
   height = 340,
+  avgPrice,
+  buyDate,
 }: {
   dates: string[];
   values: number[];
   height?: number;
+  /** Optional: draws a dashed horizontal reference line at this price
+   *  (your average buy price), like Trading212's own position chart. */
+  avgPrice?: number;
+  /** Optional: draws a dashed vertical marker at this date (when the
+   *  position was opened). Only visible on ranges that include the date. */
+  buyDate?: string;
 }) {
   const [range, setRange] = useState<Range>("1Y");
 
@@ -47,6 +55,66 @@ export default function PriceChart({
   }, [dates, values, range]);
 
   const color = up ? "#22C55E" : "#EF4444";
+
+  const yaxisAnnotations =
+    avgPrice != null
+      ? [
+          {
+            y: avgPrice,
+            borderColor: "#98A2B3",
+            strokeDashArray: 4,
+            label: {
+              text: `Your avg $${avgPrice.toFixed(2)}`,
+              position: "left",
+              style: { color: "#fff", background: "#98A2B3", fontSize: "11px" },
+            },
+          },
+        ]
+      : [];
+
+  // Price bars are anchored to midnight UTC of each date, but a same-day
+  // buy timestamp includes intraday time (e.g. "...T16:33:18+03:00"),
+  // which can land AFTER the last bar's midnight timestamp and fail an
+  // exact-time range check. Compare calendar dates only, then snap the
+  // marker to the nearest bar so it lines up with the actual chart data.
+  const buyDateOnly = buyDate
+    ? new Date(new Date(buyDate).toDateString()).getTime()
+    : null;
+  const inRange =
+    buyDateOnly != null && series.length > 0 &&
+    buyDateOnly >= new Date(new Date(series[0].x).toDateString()).getTime() &&
+    buyDateOnly <= new Date(new Date(series[series.length - 1].x).toDateString()).getTime();
+  const buyTs = inRange
+    ? series.reduce((closest, pt) =>
+        Math.abs(pt.x - buyDateOnly!) < Math.abs(closest - buyDateOnly!) ? pt.x : closest,
+        series[0].x)
+    : null;
+  // Anchor the label inward when the marker sits near either edge, so
+  // "Bought" doesn't get clipped off the side of the chart (it lands at
+  // the very last bar often, since most buys are recent).
+  const rangeStart = series.length ? series[0].x : 0;
+  const rangeEnd = series.length ? series[series.length - 1].x : 1;
+  const pct = buyTs != null ? (buyTs - rangeStart) / (rangeEnd - rangeStart || 1) : 0.5;
+  const textAnchor: "start" | "middle" | "end" =
+    pct > 0.85 ? "end" : pct < 0.15 ? "start" : "middle";
+
+  const xaxisAnnotations =
+    inRange && buyTs != null
+      ? [
+          {
+            x: buyTs,
+            borderColor: "#775DD0",
+            strokeDashArray: 4,
+            label: {
+              text: "Bought",
+              orientation: "horizontal" as const,
+              textAnchor,
+              style: { color: "#fff", background: "#775DD0", fontSize: "11px" },
+            },
+          },
+        ]
+      : [];
+
   const options: ApexOptions = {
     chart: {
       type: "area",
@@ -79,6 +147,7 @@ export default function PriceChart({
       x: { format: "dd MMM yyyy" },
       y: { formatter: (v: number) => v.toFixed(2) },
     },
+    annotations: { yaxis: yaxisAnnotations, xaxis: xaxisAnnotations },
   };
 
   return (

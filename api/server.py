@@ -254,6 +254,10 @@ def portfolio():
     positions = _fetch_t212_positions(host, auth)
 
     df, as_of = _screener_df()
+    px = _cache["px"]
+    # Signal Book is the app's one rating system now (see /api/journal) — the
+    # composite AI Score/action is no longer surfaced here.
+    w_now = _signal_weights_at(str(pd.Timestamp.today().normalize().date()))
     out = []
     for p in positions:
         # Confirmed live against GET /equity/positions on the demo account
@@ -262,16 +266,20 @@ def portfolio():
         # under walletImpact.unrealizedProfitLoss — not top-level "ppl".
         raw = p.get("instrument", {}).get("ticker", "")   # e.g. "AAPL_US_EQ"
         sym = raw.split("_")[0]
-        score_row = df.loc[sym] if sym in df.index else None
+        wallet = p.get("walletImpact", {})
         out.append({
             "ticker": sym, "t212_ticker": raw,
             "quantity": _clean(p.get("quantity")),
             "average_price": _clean(p.get("averagePricePaid")),
             "current_price": _clean(p.get("currentPrice")),
-            "ppl": _clean(p.get("walletImpact", {}).get("unrealizedProfitLoss")),
-            "ai_score": _clean(score_row["ai_score"]) if score_row is not None else None,
-            "action": score_row["action"] if score_row is not None else None,
-            "in_universe": score_row is not None,
+            "market_value": _clean(wallet.get("currentValue")),
+            "opened_at": p.get("createdAt"),
+            "ppl": _clean(wallet.get("unrealizedProfitLoss")),
+            "signal_weight": (
+                _clean(round(float(w_now[sym]) * 100, 2))
+                if sym in w_now.index and w_now[sym] > 0 else None
+            ),
+            "in_universe": sym in df.index,
         })
     return {"connected": True, "as_of": as_of, "positions": out}
 
@@ -376,94 +384,72 @@ def _normalise_order(raw: dict) -> dict:
     }
 
 
-_HIST_SCORE_CACHE: dict = {}
-_HIST_SCORE_TTL = 60 * 60  # underlying prices/sentiment log for a past date don't change
+_SIGNAL_WEIGHTS_CACHE: dict = {}
+_SIGNAL_WEIGHTS_TTL = 60 * 60  # a past date's weights never change; "today" is hourly-enough
 
 
-def _historical_snapshot_scores(date_key: str) -> pd.DataFrame:
-    """Reconstruct the full-universe AI Score as it stood at `date_key`, for
-    the Journal's 'score at time of trade' column.
-
-    Reuses the same technical-panel logic as the backtest/signals engine
-    (momentum.build_panels) and the same date-lookup rule used throughout
-    this app: nearest available close ON OR BEFORE the target date. For an
-    order filled intraday, that naturally resolves to *yesterday's* close —
-    which is correct, since that's the close the signal was actually built
-    from when the trade executed (see the T+1 execution discussion: you
-    always trade on the prior day's signal).
+def _signal_weights_at(date_key: str) -> pd.Series:
+    """Target Signal Book weights (src/signals.py's entry filter + inverse-vol
+    sizing) as of `date_key` — the nearest available close ON OR BEFORE that
+    date, matching the T+1 execution rule used throughout this app (an order
+    filled intraday was actually built from the PRIOR close). Shared by
+    /api/signals ("today") and /api/journal ("was this ticker a pick when I
+    traded it"), so both endpoints always agree with each other and with the
+    real backtest engine — one signal system, not two.
 
     Sentiment is looked up from data/sentiment_history.csv (nearest logged
     snapshot per ticker on/before the date; neutral 0.0 if none logged that
-    far back yet — never fabricated, per the project's own rule).
+    far back yet — never fabricated, per the project's own rule). Cached per
+    date, since a past date's weights never change.
 
-    Fundamentals have NO history in this app (7-day-TTL cache, current only)
-    — the CURRENT cached values are reused here as an approximation, since
-    fundamentals move slowly relative to price/sentiment and there is no
-    historical fundamentals store to draw from instead. This means the
-    reconstructed score's fundamentals layer (30% weight) is NOT truly
-    point-in-time; only the technical + sentiment layers are.
-
-    Cross-sectional normalisation (min-max/winsorised across the universe)
-    requires scoring the WHOLE universe for that date, not just one ticker
-    — hence this returns a full DataFrame, cached per date."""
+    Price/technical panels and sentiment are bounded DIFFERENTLY on purpose:
+    price panels can only reflect a completed close, so they're clamped to
+    the nearest available bar on/before `date_key` (the T+1 constraint — a
+    hard data limit, today's close doesn't exist yet). Sentiment isn't
+    bar-based; it's a same-day "what's the news saying right now" reading
+    that the scheduled fetch already updates same-day, so it's bounded to
+    the actual `date_key` itself, not clamped to the last price close. For
+    any real historical date this is a no-op (price data already exists for
+    that date, so the two bounds coincide) — it only matters for "today",
+    when price necessarily lags but sentiment doesn't have to."""
     now = time.time()
-    cached = _HIST_SCORE_CACHE.get(date_key)
-    if cached is not None and now - cached["ts"] < _HIST_SCORE_TTL:
-        return cached["df"]
+    cached = _SIGNAL_WEIGHTS_CACHE.get(date_key)
+    if cached is not None and now - cached["ts"] < _SIGNAL_WEIGHTS_TTL:
+        return cached["w"]
 
-    df, as_of = _screener_df()
     px = _cache["px"]
-    target = min(pd.Timestamp(date_key), px.index.max())
+    query_date = pd.Timestamp(date_key)
+    target = min(query_date, px.index.max())   # price/panel bound (hard constraint)
     panels = momentum.build_panels(px)
 
-    def row_at(frame: pd.DataFrame) -> pd.Series:
-        idx = frame.index.get_indexer([target], method="ffill")[0]
-        return frame.iloc[idx] if idx >= 0 else pd.Series(dtype=float)
-
-    price_row = row_at(px)
-    ma_long_row = row_at(panels["ma_long"]) if "ma_long" in panels else pd.Series(dtype=float)
-
-    snap = pd.DataFrame(index=px.columns)
-    snap["mom_12m"] = row_at(panels["tsm"]) if "tsm" in panels else np.nan
-    snap["ratio_52w"] = row_at(panels["ratio52"]) if "ratio52" in panels else np.nan
-    snap["rsi"] = row_at(panels["rsi"]) if "rsi" in panels else np.nan
-    snap["above_long_ma"] = ((price_row > ma_long_row).astype(int)
-                              if not ma_long_row.empty else 0)
-    snap["volatility"] = row_at(panels["vol"]) if "vol" in panels else np.nan
-    if "macd_hist" in panels:
-        snap["macd_hist"] = row_at(panels["macd_hist"])
-
-    sent_col = pd.Series(0.0, index=px.columns)
+    sent_row = pd.Series(0.0, index=px.columns)
     try:
         p = Path(CFG.paths.sentiment_log)
         if p.exists():
             hist = pd.read_csv(p, parse_dates=["date"])
-            hist = hist[hist.date <= target]
+            hist = hist[hist.date <= query_date]   # sentiment bound (no such constraint)
             if not hist.empty:
                 latest = hist.sort_values("date").groupby("ticker").tail(1)
-                sent_col = (latest.set_index("ticker")["score"]
+                sent_row = (latest.set_index("ticker")["score"]
                             .reindex(px.columns).fillna(0.0))
     except Exception:
         pass
-    snap["sentiment_score"] = sent_col
 
-    for c in ("roe", "pe_forward", "debt_equity", "gross_margin",
-              "revenue_growth", "operating_margin", "market_cap"):
-        if c in df.columns:
-            snap[c] = df[c].reindex(px.columns)
-
-    scored = compute_ai_score(snap)
-    _HIST_SCORE_CACHE[date_key] = {"df": scored, "ts": now}
-    return scored
+    w = signals.weights_for_date(target, px, panels, sentiment=sent_row,
+                                  use_sentiment=True)
+    _SIGNAL_WEIGHTS_CACHE[date_key] = {"w": w, "ts": now}
+    return w
 
 
 @app.get("/api/journal")
 def journal():
     """Trade journal: your actual FILLED T212 orders (demo or live,
-    whichever T212_ENV points at), cross-checked against the model's
-    current AI Score/action AND the score as it stood on the trade date.
-    Read-only — never places orders, even though the configured key may
-    have order permissions."""
+    whichever T212_ENV points at), cross-checked against the Signal Book
+    (the SAME entry-filter/weighting system as /api/signals and the
+    backtest — not the Screener's separate composite AI Score, which uses
+    different criteria and can legitimately disagree with what the Signal
+    Book picked). Read-only — never places orders, even though the
+    configured key may have order permissions."""
     key = os.environ.get("T212_API_KEY", "").strip()
     secret = os.environ.get("T212_API_SECRET", "").strip()
     placeholder = key.startswith("your_") or secret.startswith("your_")
@@ -485,24 +471,27 @@ def journal():
     orders.sort(key=lambda o: o["date"] or "", reverse=True)
 
     df, as_of = _screener_df()
+    # "Now" = today's real calendar date, not the price cache's last close —
+    # so today's own sentiment fetch is picked up even before the market
+    # closes (see _signal_weights_at's docstring on the two different bounds).
+    w_now = _signal_weights_at(str(pd.Timestamp.today().normalize().date()))
+
     for o in orders:
         t = o["ticker"]
-        row = df.loc[t] if t in df.index else None
-        o["ai_score"] = _clean(row["ai_score"]) if row is not None else None
-        o["action"] = row["action"] if row is not None else None
-        o["in_universe"] = row is not None
+        o["in_universe"] = t in df.index
 
-        o["ai_score_at_trade"] = None
-        o["action_at_trade"] = None
+        o["signal_weight_now"] = (
+            _clean(round(float(w_now[t]) * 100, 2))
+            if t in w_now.index and w_now[t] > 0 else None
+        )
+
+        o["signal_weight_at_trade"] = None
         if o["date"]:
             try:
                 date_key = str(pd.Timestamp(o["date"]).date())
-                hist_df = _historical_snapshot_scores(date_key)
-                hrow = hist_df.loc[t] if t in hist_df.index else None
-                if hrow is not None:
-                    o["ai_score_at_trade"] = _clean(hrow["ai_score"])
-                    if pd.notna(hrow["action"]):
-                        o["action_at_trade"] = str(hrow["action"])
+                w_trade = _signal_weights_at(date_key)
+                if t in w_trade.index and w_trade[t] > 0:
+                    o["signal_weight_at_trade"] = _clean(round(float(w_trade[t]) * 100, 2))
             except Exception:
                 pass
 
@@ -513,14 +502,15 @@ def journal():
 @app.get("/api/meta")
 def meta():
     df, as_of = _screener_df()
+    px = _cache["px"]
+    w = _signal_weights_at(str(px.index[-1].date()))
     return {
         "as_of": as_of,
+        "universe_size": len(df),
         "sleeves": sorted(df["sleeve"].unique().tolist()),
         "sectors": sorted(df["sector"].unique().tolist()),
-        "buy": int((df["action"] == "BUY").sum()),
-        "hold": int((df["action"] == "HOLD").sum()),
-        "avoid": int((df["action"] == "AVOID").sum()),
-        "avg_score": round(float(df["ai_score"].mean()), 2),
+        "signal_count": int((w > 0).sum()),
+        "gross_long_pct": round(float(w[w > 0].sum()) * 100, 1),
     }
 
 
@@ -528,17 +518,19 @@ def meta():
 def signals_endpoint(capital: float = 100_000.0):
     """Today's Signal Book: names passing the entry filter (src/signals.py),
     inverse-vol weighted, with a suggested £ allocation and share count for
-    the given capital. Read-only — mirrors the dashboard SIGNALS tab, using
-    the same cached sentiment snapshot as the screener (no live re-fetch)."""
+    the given capital. Read-only — mirrors the dashboard SIGNALS tab. Weight
+    computation is shared with /api/journal via _signal_weights_at, so both
+    always agree on what the Signal Book actually picked on a given date."""
     df, as_of = _screener_df()
     px = _cache["px"]
-    panels = momentum.build_panels(px)
-    today = px.index[-1]
+    panels = momentum.build_panels(px)   # still needed here for the display-only
+                                          # mom_12m/ratio_52w/rsi fields below
     sent_row = (df["sentiment_score"] if "sentiment_score" in df.columns
                 else pd.Series(0.0, index=df.index)).reindex(px.columns).fillna(0.0)
 
-    w = signals.weights_for_date(today, px, panels, sentiment=sent_row,
-                                  use_sentiment=True)
+    # Today's real calendar date, not the price cache's last close — see
+    # _signal_weights_at's docstring on why sentiment isn't clamped to price.
+    w = _signal_weights_at(str(pd.Timestamp.today().normalize().date()))
     longs = w[w > 0].sort_values(ascending=False)
 
     positions = []

@@ -2,8 +2,18 @@
 import React, { useEffect, useState } from "react";
 import Link from "next/link";
 import Badge from "@/components/ui/badge/Badge";
-import ScoreBar from "@/components/screener/ScoreBar";
 import { fetchJournal, JournalResponse } from "@/lib/api";
+
+function SignalCell({ weight }: { weight: number | null }) {
+  if (weight == null) {
+    return <span className="text-xs text-gray-400">not picked</span>;
+  }
+  return (
+    <Badge size="sm" color="success">
+      {weight.toFixed(1)}%
+    </Badge>
+  );
+}
 
 export default function JournalPage() {
   const [data, setData] = useState<JournalResponse | null>(null);
@@ -20,7 +30,7 @@ export default function JournalPage() {
           Trade Journal
         </h1>
         <p className="text-sm text-gray-500 dark:text-gray-400">
-          Your actual filled Trading212 orders, checked against the model&apos;s current view
+          Your actual filled Trading212 orders, checked against the Signal Book
         </p>
       </div>
 
@@ -61,8 +71,8 @@ export default function JournalPage() {
                       <th className="px-5 py-3">Qty</th>
                       <th className="px-5 py-3">Fill price</th>
                       <th className="px-5 py-3">Value</th>
-                      <th className="px-5 py-3">AI Score (now)</th>
-                      <th className="px-5 py-3">Model view (now)</th>
+                      <th className="px-5 py-3">Signal @ trade</th>
+                      <th className="px-5 py-3">Signal now</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -92,25 +102,10 @@ export default function JournalPage() {
                         <td className="px-5 py-3">{t.fill_price?.toFixed(2) ?? "-"}</td>
                         <td className="px-5 py-3">{t.fill_value?.toFixed(2) ?? "-"}</td>
                         <td className="px-5 py-3">
-                          <ScoreBar score={t.ai_score} />
+                          <SignalCell weight={t.signal_weight_at_trade} />
                         </td>
                         <td className="px-5 py-3">
-                          {t.action ? (
-                            <Badge
-                              size="sm"
-                              color={
-                                t.action === "BUY"
-                                  ? "success"
-                                  : t.action === "AVOID"
-                                  ? "error"
-                                  : "warning"
-                              }
-                            >
-                              {t.action}
-                            </Badge>
-                          ) : (
-                            <span className="text-xs text-gray-400">not in universe</span>
-                          )}
+                          <SignalCell weight={t.signal_weight_now} />
                         </td>
                       </tr>
                     ))}
@@ -118,8 +113,10 @@ export default function JournalPage() {
                 </table>
               </div>
               <p className="px-5 py-3 text-xs text-gray-400">
-                Read-only via Trading212 Public API · &quot;Model view (now)&quot; is today&apos;s
-                score, not the score at the time you traded · not investment advice
+                Read-only via Trading212 Public API · &quot;Signal&quot; is the same entry-filter
+                + inverse-vol weighting shown on the Signals page and used by the backtest.
+                A weight means the ticker was a Signal Book pick on that date, &quot;not
+                picked&quot; means it wasn&apos;t · not investment advice
               </p>
             </div>
           )}

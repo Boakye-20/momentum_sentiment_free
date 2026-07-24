@@ -46,9 +46,10 @@ export interface Position {
   quantity: number | null;
   average_price: number | null;
   current_price: number | null;
+  market_value: number | null;
+  opened_at: string | null;
   ppl: number | null;
-  ai_score: number | null;
-  action: string | null;
+  signal_weight: number | null;
   in_universe: boolean;
 }
 
@@ -61,12 +62,11 @@ export interface PortfolioResponse {
 
 export interface Meta {
   as_of: string;
+  universe_size: number;
   sleeves: string[];
   sectors: string[];
-  buy: number;
-  hold: number;
-  avoid: number;
-  avg_score: number;
+  signal_count: number;
+  gross_long_pct: number;
 }
 
 export interface BacktestMetrics {
@@ -204,8 +204,8 @@ export interface JournalTrade {
   fill_value: number | null;
   date: string | null;
   order_type: string | null;
-  ai_score: number | null;
-  action: string | null;
+  signal_weight_at_trade: number | null;
+  signal_weight_now: number | null;
   in_universe: boolean;
   raw: Record<string, unknown>;
 }

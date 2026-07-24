@@ -51,7 +51,7 @@ export default function Copilot() {
           AI Copilot
         </h2>
         <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
-          Answers are grounded only in this screener&apos;s own data: computed scores,
+          Answers are grounded only in this app&apos;s own data: computed scores,
           Yahoo Finance fundamentals, and Alpha Vantage / free news sentiment history.
         </p>
       </div>

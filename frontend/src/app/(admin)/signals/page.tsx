@@ -72,7 +72,7 @@ export default function SignalsPage() {
 
       {err && (
         <p className="text-error-500">
-          {err} — is the API running?{" "}
+          {err}. Is the API running?{" "}
           <code className="rounded bg-gray-100 px-1.5 py-0.5 text-xs dark:bg-white/10">
             uvicorn api.server:app --port 8000
           </code>
@@ -162,10 +162,15 @@ export default function SignalsPage() {
                 </table>
               </div>
               <p className="px-5 py-3 text-xs text-gray-400">
-                Shares are rounded down to what your allocation fully covers at the last
-                close price — not a live quote, and not investment advice. Weights come
-                from the same inverse-vol sizing used in the backtest (max 15 positions,
-                capped at 2x equal weight per name).
+                Every price here is in USD (this app has no FX conversion), including
+                foreign names like GSK or ASML held via their US-listed ADR, not their
+                LSE/Euronext listing. &quot;Suggested shares&quot; divides your £ allocation by
+                that $ price without converting, so treat it as illustrative only, not a
+                literal share count. Enter the £ allocation directly as a value-based order
+                in T212 instead (like the Citigroup trade) and let T212 handle the FX
+                conversion. Not a live quote, and not investment advice. Weights come from
+                the same inverse-vol sizing used in the backtest (max 15 positions, capped
+                at 2x equal weight per name).
               </p>
             </div>
           )}

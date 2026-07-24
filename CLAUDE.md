@@ -168,15 +168,47 @@ UI, holds the design tokens), `data-ops` (price cache, sentiment fetching,
 AV rate budget). Prefer them for work in their lane — each carries the
 project-specific pitfalls for its area.
 
+## Restarting the backend/frontend dev servers
+
+Always use `scripts/restart_servers.ps1` (kills by **port**, not by PID) rather
+than stopping a remembered uvicorn/node PID directly. `uvicorn --reload`
+spawns a reloader process plus a separate worker process that holds the
+socket; killing only the reloader PID orphans the worker, which keeps the
+port and keeps serving with the old `.env`/code — so a `.env` edit + "restart"
+can silently do nothing. Symptom: an endpoint keeps returning stale data
+(e.g. `T212_ENV`) after an edit you're sure was saved and a restart you're
+sure you ran — check `Get-NetTCPConnection -LocalPort 8000` for the real
+owning PID before assuming the code is wrong.
+
+```powershell
+powershell -File scripts\restart_servers.ps1            # both servers
+powershell -File scripts\restart_servers.ps1 -Backend   # just :8000
+powershell -File scripts\restart_servers.ps1 -Frontend  # just :3000
+```
+
 ## Automation
 
 A Windows Task Scheduler job ("MomentumSentiment Daily Fetch", daily 07:30,
 runs on next boot if missed) executes `scripts/daily_fetch.py` via
-`scripts/daily_fetch.cmd`: free RSS+VADER snapshot → incremental Alpha
-Vantage history (no-op once complete) → auto-commits
-`data/sentiment_history.csv`. Output goes to `outputs/daily_fetch.log`.
-The .cmd wrapper hardcodes the repo and python paths — update it if either
-moves. Manage with `Get-ScheduledTask`/`Unregister-ScheduledTask`.
+`scripts/daily_fetch.cmd`: price cache refresh → free RSS+VADER snapshot →
+incremental Alpha Vantage history (no-op once complete) → portfolio
+signal-drop email alert (`scripts/portfolio_alerts.py`, see below) →
+auto-commits `data/sentiment_history.csv`. Output goes to
+`outputs/daily_fetch.log`. The .cmd wrapper hardcodes the repo and python
+paths — update it if either moves. Manage with
+`Get-ScheduledTask`/`Unregister-ScheduledTask`.
+
+### Portfolio signal-drop email alert
+
+`scripts/portfolio_alerts.py` re-imports `api/server.py`'s own T212 fetch +
+`_signal_weights_at` logic directly (no FastAPI process needs to be running)
+so it always agrees with what the Portfolio page shows. Best-effort, skipped
+silently if `T212_API_KEY`/`GMAIL_USER`/`GMAIL_APP_PASSWORD` aren't set in
+`.env`. Sends via Gmail SMTP — needs a Google App Password (2-Step
+Verification required): https://myaccount.google.com/apppasswords. This app
+is long-only with no sell button, so this is the only nudge the user gets
+when a holding drops off the Signal Book; check manually via the Portfolio
+page in the meantime. Manual run: `python scripts/portfolio_alerts.py`.
 
 ## Data status (update when fetches run)
 

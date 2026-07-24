@@ -2,7 +2,6 @@
 import React, { useEffect, useState } from "react";
 import Link from "next/link";
 import Badge from "@/components/ui/badge/Badge";
-import ScoreBar from "@/components/screener/ScoreBar";
 import { fetchPortfolio, PortfolioResponse } from "@/lib/api";
 
 export default function PortfolioPage() {
@@ -20,12 +19,32 @@ export default function PortfolioPage() {
           My Portfolio
         </h1>
         <p className="text-sm text-gray-500 dark:text-gray-400">
-          Trading212 holdings, cross-checked against your AI Scores
+          Trading212 holdings, cross-checked against the Signal Book
         </p>
       </div>
 
       {err && <p className="text-error-500">{err}</p>}
       {!data && !err && <p className="text-gray-500">Loading…</p>}
+
+      {data?.connected && data.positions && (() => {
+        const dropped = data.positions.filter((p) => p.in_universe && p.signal_weight == null);
+        if (dropped.length === 0) return null;
+        return (
+          <div className="mb-4 rounded-xl border border-warning-200 bg-warning-50 px-4 py-3 text-sm text-warning-700 dark:border-warning-500/30 dark:bg-warning-500/10 dark:text-warning-400">
+            <strong>{dropped.length} position{dropped.length > 1 ? "s" : ""}</strong>{" "}
+            {dropped.length > 1 ? "have" : "has"} dropped off the Signal Book:{" "}
+            {dropped.map((p, i) => (
+              <React.Fragment key={p.t212_ticker}>
+                {i > 0 && ", "}
+                <Link href={`/stock/${p.ticker}`} className="font-semibold underline">
+                  {p.ticker}
+                </Link>
+              </React.Fragment>
+            ))}
+            . Time for the monthly review, see Data & Model &quot;When to sell&quot;.
+          </div>
+        );
+      })()}
 
       {data && !data.connected && (
         <div className="rounded-2xl border border-gray-200 bg-white p-8 dark:border-gray-800 dark:bg-white/[0.03]">
@@ -69,16 +88,20 @@ export default function PortfolioPage() {
                   <th className="px-5 py-3">Qty</th>
                   <th className="px-5 py-3">Avg price</th>
                   <th className="px-5 py-3">Current</th>
+                  <th className="px-5 py-3">Value</th>
                   <th className="px-5 py-3">P/L</th>
-                  <th className="px-5 py-3">AI Score</th>
-                  <th className="px-5 py-3">Model view</th>
+                  <th className="px-5 py-3">Signal Book</th>
                 </tr>
               </thead>
               <tbody>
-                {data.positions.map((p) => (
+                {data.positions.map((p) => {
+                  const dropped = p.in_universe && p.signal_weight == null;
+                  return (
                   <tr
                     key={p.t212_ticker}
-                    className="border-b border-gray-50 hover:bg-gray-50 dark:border-gray-800/60 dark:hover:bg-white/[0.02]"
+                    className={`border-b border-gray-50 hover:bg-gray-50 dark:border-gray-800/60 dark:hover:bg-white/[0.02] ${
+                      dropped ? "bg-warning-50/60 dark:bg-warning-500/[0.06]" : ""
+                    }`}
                   >
                     <td className="px-5 py-3 font-semibold text-gray-800 dark:text-white/90">
                       {p.in_universe ? (
@@ -92,6 +115,9 @@ export default function PortfolioPage() {
                     <td className="px-5 py-3">{p.quantity ?? "-"}</td>
                     <td className="px-5 py-3">{p.average_price?.toFixed(2) ?? "-"}</td>
                     <td className="px-5 py-3">{p.current_price?.toFixed(2) ?? "-"}</td>
+                    <td className="px-5 py-3 font-medium text-gray-800 dark:text-white/90">
+                      {p.market_value != null ? `£${p.market_value.toFixed(2)}` : "-"}
+                    </td>
                     <td
                       className={`px-5 py-3 font-medium ${
                         (p.ppl ?? 0) >= 0 ? "text-success-600" : "text-error-500"
@@ -100,28 +126,19 @@ export default function PortfolioPage() {
                       {p.ppl?.toFixed(2) ?? "-"}
                     </td>
                     <td className="px-5 py-3">
-                      <ScoreBar score={p.ai_score} />
-                    </td>
-                    <td className="px-5 py-3">
-                      {p.action ? (
-                        <Badge
-                          size="sm"
-                          color={
-                            p.action === "BUY"
-                              ? "success"
-                              : p.action === "AVOID"
-                              ? "error"
-                              : "warning"
-                          }
-                        >
-                          {p.action}
+                      {p.signal_weight != null ? (
+                        <Badge size="sm" color="success">
+                          {p.signal_weight.toFixed(1)}%
                         </Badge>
                       ) : (
-                        <span className="text-xs text-gray-400">not in universe</span>
+                        <span className={`text-xs ${dropped ? "font-medium text-warning-600" : "text-gray-400"}`}>
+                          {p.in_universe ? "not picked" : "not in universe"}
+                        </span>
                       )}
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>

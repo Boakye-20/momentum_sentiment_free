@@ -40,9 +40,13 @@ def main() -> int:
 
     # Keep the price cache current so the dashboard/API never serve stale
     # prices. yfinance first, Twelve Data fallback (slow but free) if set.
+    # max_age_days=0 forces a top-up attempt every run: this job runs once
+    # daily, so the default 3-day tolerance (meant for other callers, e.g.
+    # the API checking freshness on every web request) let 1-2 day-old
+    # data silently pass as "fresh enough" and never actually refresh.
     try:
         from src.data import refresh_price_cache
-        refresh_price_cache()
+        refresh_price_cache(max_age_days=0)
     except Exception as e:
         print(f"[daily] price cache refresh failed: {e}")
 
@@ -63,6 +67,12 @@ def main() -> int:
     except Exception as e:
         # A missing key or exhausted budget shouldn't kill the free-side run.
         print(f"[daily] alpha vantage fetch failed: {e}")
+
+    try:
+        from scripts import portfolio_alerts
+        portfolio_alerts.main()
+    except Exception as e:
+        print(f"[daily] portfolio alert check failed: {e}")
 
     log = CFG.paths.sentiment_log
     if _git("diff", "--quiet", "--", log).returncode != 0:

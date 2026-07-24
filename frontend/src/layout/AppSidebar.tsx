@@ -3,6 +3,7 @@ import React, { useEffect, useRef, useState,useCallback } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useSidebar } from "../context/SidebarContext";
+import { fetchPortfolio } from "@/lib/api";
 import {
   BoltIcon,
   ChevronDownIcon,
@@ -24,18 +25,18 @@ type NavItem = {
 const navItems: NavItem[] = [
   {
     icon: <GridIcon />,
-    name: "Screener",
+    name: "Browse",
     path: "/",
-  },
-  {
-    icon: <PieChartIcon />,
-    name: "Portfolio",
-    path: "/portfolio",
   },
   {
     icon: <ListIcon />,
     name: "Signals",
     path: "/signals",
+  },
+  {
+    icon: <PieChartIcon />,
+    name: "Portfolio",
+    path: "/portfolio",
   },
   {
     icon: <TaskIcon />,
@@ -59,6 +60,21 @@ const othersItems: NavItem[] = [];
 const AppSidebar: React.FC = () => {
   const { isExpanded, isMobileOpen, isHovered, setIsHovered } = useSidebar();
   const pathname = usePathname();
+  const [droppedCount, setDroppedCount] = useState(0);
+
+  useEffect(() => {
+    // Best-effort: count held positions that have fallen off the Signal
+    // Book, so there's a visible nudge to review even off the Portfolio
+    // page. Silently 0 if Trading212 isn't connected.
+    fetchPortfolio()
+      .then((r) => {
+        const n = (r.positions ?? []).filter(
+          (p) => p.in_universe && p.signal_weight == null
+        ).length;
+        setDroppedCount(n);
+      })
+      .catch(() => setDroppedCount(0));
+  }, [pathname]);
 
   const renderMenuItems = (
     navItems: NavItem[],
@@ -122,6 +138,11 @@ const AppSidebar: React.FC = () => {
                 </span>
                 {(isExpanded || isHovered || isMobileOpen) && (
                   <span className={`menu-item-text`}>{nav.name}</span>
+                )}
+                {nav.name === "Portfolio" && droppedCount > 0 && (isExpanded || isHovered || isMobileOpen) && (
+                  <span className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-warning-500 px-1.5 text-xs font-semibold text-white">
+                    {droppedCount}
+                  </span>
                 )}
               </Link>
             )
