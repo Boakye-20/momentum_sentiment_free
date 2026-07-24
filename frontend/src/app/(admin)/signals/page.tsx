@@ -89,6 +89,16 @@ export default function SignalsPage() {
             <Stat label="As of" value={data.as_of} />
           </div>
 
+          <div className="mb-4 rounded-xl border border-brand-200 bg-brand-50 px-4 py-3 text-sm text-brand-700 dark:border-brand-500/30 dark:bg-brand-500/10 dark:text-brand-300">
+            <strong>How to place these trades:</strong> use the{" "}
+            <strong>Suggested alloc (£)</strong> column as a value-based order
+            in Trading212, not the Shares column. Shares is only illustrative:
+            it divides £ allocation by a USD price with no FX conversion, and
+            the live price will have moved slightly by the time you trade. A
+            value-based order lets T212 work out the share count and FX at
+            execution, so it always matches.
+          </div>
+
           {data.positions.length === 0 ? (
             <div className="rounded-2xl border border-gray-200 bg-white p-8 text-center text-gray-500 dark:border-gray-800 dark:bg-white/[0.03]">
               No names pass the entry filter today.
@@ -104,8 +114,8 @@ export default function SignalsPage() {
                       <th className="px-5 py-3">Sleeve</th>
                       <th className="px-5 py-3">Weight</th>
                       <th className="px-5 py-3">Price</th>
-                      <th className="px-5 py-3">Suggested alloc</th>
-                      <th className="px-5 py-3">Shares</th>
+                      <th className="px-5 py-3">Suggested alloc (£)</th>
+                      <th className="px-5 py-3 text-gray-400">Shares (illustrative)</th>
                       <th className="px-5 py-3">12m mom</th>
                       <th className="px-5 py-3">RSI</th>
                       <th className="px-5 py-3">Sentiment</th>
@@ -146,7 +156,7 @@ export default function SignalsPage() {
                         <td className="px-5 py-3 font-medium text-gray-800 dark:text-white/90">
                           £{p.alloc_gbp.toLocaleString(undefined, { maximumFractionDigits: 0 })}
                         </td>
-                        <td className="px-5 py-3">{p.suggested_shares}</td>
+                        <td className="px-5 py-3 text-gray-400">{p.suggested_shares}</td>
                         <td
                           className={`px-5 py-3 ${
                             (p.mom_12m ?? 0) >= 0 ? "text-success-600" : "text-error-500"
@@ -164,13 +174,9 @@ export default function SignalsPage() {
               <p className="px-5 py-3 text-xs text-gray-400">
                 Every price here is in USD (this app has no FX conversion), including
                 foreign names like GSK or ASML held via their US-listed ADR, not their
-                LSE/Euronext listing. &quot;Suggested shares&quot; divides your £ allocation by
-                that $ price without converting, so treat it as illustrative only, not a
-                literal share count. Enter the £ allocation directly as a value-based order
-                in T212 instead (like the Citigroup trade) and let T212 handle the FX
-                conversion. Not a live quote, and not investment advice. Weights come from
-                the same inverse-vol sizing used in the backtest (max 15 positions, capped
-                at 2x equal weight per name).
+                LSE/Euronext listing. Not a live quote, and not investment advice. Weights
+                come from the same inverse-vol sizing used in the backtest (max 15
+                positions, capped at 2x equal weight per name).
               </p>
             </div>
           )}
