@@ -207,6 +207,7 @@ export interface JournalTrade {
   signal_weight_at_trade: number | null;
   signal_weight_now: number | null;
   in_universe: boolean;
+  is_bot?: boolean;
   raw: Record<string, unknown>;
 }
 

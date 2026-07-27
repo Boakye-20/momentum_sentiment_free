@@ -476,9 +476,21 @@ def journal():
     # closes (see _signal_weights_at's docstring on the two different bounds).
     w_now = _signal_weights_at(str(pd.Timestamp.today().normalize().date()))
 
+    bot_file = Path(CFG.paths.data_dir) / "bot_orders.json"
+    bot_orders = set()
+    if bot_file.exists():
+        try:
+            import json
+            with open(bot_file, "r") as f:
+                # Store as strings for easy matching
+                bot_orders = set(str(x) for x in json.load(f))
+        except Exception:
+            pass
+
     for o in orders:
         t = o["ticker"]
         o["in_universe"] = t in df.index
+        o["is_bot"] = str(o.get("id")) in bot_orders
 
         o["signal_weight_now"] = (
             _clean(round(float(w_now[t]) * 100, 2))

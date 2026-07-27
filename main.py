@@ -103,6 +103,12 @@ def cmd_fetch_av(args):
               "then `cp .env.example .env` and paste it in.")
 
 
+def cmd_execute_trades(args):
+    """Execute target trades in Trading212."""
+    from src.executor import execute_trades
+    execute_trades(live=args.live, override_capital=args.capital)
+
+
 def build_parser():
     p = argparse.ArgumentParser(description="Free momentum + sentiment trading model")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -131,6 +137,11 @@ def build_parser():
     a.add_argument("--max-requests", type=int, default=25,
                    help="API calls this run (free tier ~25/day)")
     a.set_defaults(func=cmd_fetch_av)
+
+    e = sub.add_parser("execute-trades", help="place automated orders in Trading212")
+    e.add_argument("--live", action="store_true", help="actually place the trades (default is dry-run)")
+    e.add_argument("--capital", type=float, default=None, help="override the account value for sizing")
+    e.set_defaults(func=cmd_execute_trades)
     return p
 
 

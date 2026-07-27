@@ -401,13 +401,7 @@ export default function DataModelPage() {
                 Around 25 international leaders held via their US-listed ADR
                 (ASML, Novo Nordisk, TSMC, Toyota), plus five cheap European
                 quality names from the Lightman funds (Roche, Nestle, Danone,
-                KPN, DHL). Every price here is in USD, this app does no FX
-                conversion, even for foreign names: the ADR is a completely
-                separate ticker from the LSE/Euronext/Tokyo listing, never the
-                pence- or euro-denominated native quote. When placing a trade,
-                enter your £ allocation as a value-based order in Trading212 and
-                let T212 handle the conversion, the same way it worked for a
-                plain US name.
+                KPN, DHL).
               </Row>
             </div>
           </Section>

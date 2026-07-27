@@ -71,6 +71,7 @@ export default function JournalPage() {
                       <th className="px-5 py-3">Qty</th>
                       <th className="px-5 py-3">Fill price</th>
                       <th className="px-5 py-3">Value</th>
+                      <th className="px-5 py-3">Source</th>
                       <th className="px-5 py-3">Signal @ trade</th>
                       <th className="px-5 py-3">Signal now</th>
                     </tr>
@@ -101,6 +102,11 @@ export default function JournalPage() {
                         <td className="px-5 py-3">{t.quantity ?? "-"}</td>
                         <td className="px-5 py-3">{t.fill_price?.toFixed(2) ?? "-"}</td>
                         <td className="px-5 py-3">{t.fill_value?.toFixed(2) ?? "-"}</td>
+                        <td className="px-5 py-3">
+                          <Badge size="sm" color={t.is_bot ? "brand" : "gray"}>
+                            {t.is_bot ? "Bot" : "Manual"}
+                          </Badge>
+                        </td>
                         <td className="px-5 py-3">
                           <SignalCell weight={t.signal_weight_at_trade} />
                         </td>
