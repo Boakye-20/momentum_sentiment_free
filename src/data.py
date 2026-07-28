@@ -123,8 +123,16 @@ def load_prices(
     cache = Path(CFG.paths.price_cache)
     if use_cache and cache.exists():
         cached = pd.read_parquet(cache)
+        # The start-date test must tolerate `start` falling on a weekend or
+        # holiday: CFG.universe.start_date is 2015-01-01, a holiday, so the
+        # cache legitimately begins 2015-01-02. Comparing `min() <= start`
+        # exactly therefore NEVER matched, and every default load_prices() call
+        # did a full ~157-ticker yfinance download and rewrote the cache — slow,
+        # rate-limit-prone, and it silently dropped any cache column that wasn't
+        # in `tickers` (which is how the EEM/EMXC/FRDM comparison benchmarks
+        # kept disappearing). A week of slack covers any holiday run.
         if set(tickers).issubset(cached.columns) and \
-           cached.index.min() <= pd.Timestamp(start) and \
+           cached.index.min() <= pd.Timestamp(start) + pd.Timedelta(days=7) and \
            cached.index.max() >= pd.Timestamp(end) - pd.Timedelta(days=7):
             print(f"[data] using cached prices ({cache})")
             return cached.loc[start:end, tickers].ffill().dropna(how="all")
@@ -151,8 +159,24 @@ def load_prices(
         )
     if use_cache:
         os.makedirs(cache.parent, exist_ok=True)
-        prices.to_parquet(cache)
-        print(f"[data] cached prices -> {cache}")
+        # MERGE, never blind-overwrite. A caller asking for a subset of tickers
+        # must not erase the rest of the cache: the EM comparison benchmarks
+        # (EEM/EMXC/FRDM) are never in CFG.universe.tickers, so a plain
+        # `to_parquet(prices)` deleted them every time anything called
+        # load_prices() with default arguments. Freshly-fetched columns win;
+        # columns absent from this fetch are preserved.
+        out = prices
+        if cache.exists():
+            try:
+                old = pd.read_parquet(cache)
+                keep = [c for c in old.columns if c not in prices.columns]
+                if keep:
+                    out = prices.join(old[keep], how="outer").sort_index()
+            except Exception as e:
+                print(f"[data] could not merge existing cache ({e}); "
+                      "writing fetched columns only.")
+        out.to_parquet(cache)
+        print(f"[data] cached prices -> {cache} ({out.shape[1]} tickers)")
     return prices
 
 

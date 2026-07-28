@@ -2,9 +2,14 @@
 import React, { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import Sparkline from "@/components/screener/Sparkline";
-import { fetchScreener, fetchPortfolio, sleeveLabel, Stock } from "@/lib/api";
+import {
+  fetchScreener,
+  fetchPortfolio,
+  sleeveLabel,
+  SLEEVE_ORDER,
+  Stock,
+} from "@/lib/api";
 
-const SLEEVE_ORDER = ["core", "quality_value", "niche_growth", "global"];
 const PERIODS = { "1M": 21, "3M": 63, "6M": 126, "1Y": 252 } as const;
 type Period = keyof typeof PERIODS;
 

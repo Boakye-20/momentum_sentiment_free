@@ -239,11 +239,26 @@ export const fmtNum = (v: number | null | undefined, digits = 2) =>
   v == null ? "-" : v.toFixed(digits);
 
 // Machine sleeve keys to display labels. Never show raw underscores in the UI.
+// Sleeve display order AND labels, kept side by side deliberately: adding a
+// sleeve to config.SLEEVES means adding it in these two places and nowhere
+// else. Browse derives both its filter chips and its group ordering from
+// SLEEVE_ORDER, so a sleeve missing from this list renders its stocks with no
+// way to filter to them — which is exactly what happened when the `em` sleeve
+// was added and this list still had only four entries.
+export const SLEEVE_ORDER: string[] = [
+  "core",
+  "quality_value",
+  "niche_growth",
+  "global",
+  "em",
+];
+
 const SLEEVE_LABELS: Record<string, string> = {
   core: "Core",
   quality_value: "Quality Value",
   niche_growth: "Niche Growth",
   global: "Global",
+  em: "Emerging Markets",
 };
 
 export const sleeveLabel = (s: string) =>

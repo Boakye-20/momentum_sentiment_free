@@ -80,6 +80,19 @@ def weights_for_date(
     if (getattr(CFG.momentum, "use_residual_momentum", False)
             and "residual_tsm" in panels):
         tsm = _at(panels["residual_tsm"], date)
+    # EM guidance §9: rank on return-per-unit-of-risk instead of raw return.
+    # This is deliberately a SEPARATE variable from `tsm` and is used only in
+    # the ranking blend below — the LONG gate keeps comparing raw `tsm` against
+    # `trend_tsm_min`, because that threshold means "5% trailing return" and
+    # would silently mean something else entirely against a return/vol ratio.
+    # Residual momentum wins if both flags are somehow on: it is the more
+    # invasive transform, and stacking the two has no research basis.
+    rank_mom = tsm
+    if (not getattr(CFG.momentum, "use_residual_momentum", False)
+            and getattr(CFG.momentum, "use_vol_adjusted_momentum", False)
+            and "vol_adj_tsm" in panels):
+        rank_mom = _at(panels["vol_adj_tsm"], date)
+
     ratio   = _at(panels["ratio52"], date)
     rsi     = _at(panels["rsi"], date)
     ma_long = _at(panels["ma_long"], date)
@@ -159,7 +172,7 @@ def weights_for_date(
     # lives in [-1, 1] while z-scores span ~[-2, 2], which silently halved the
     # effective sentiment weight).
     tilt = _zscore(sent[long_mask] if use_sentiment else ratio[long_mask])
-    rank = (1 - sc.rank_sentiment_weight) * _zscore(tsm[long_mask]) \
+    rank = (1 - sc.rank_sentiment_weight) * _zscore(rank_mom[long_mask]) \
          + sc.rank_sentiment_weight * tilt
     longs = rank.sort_values(ascending=False).head(max_n).index.tolist()
 

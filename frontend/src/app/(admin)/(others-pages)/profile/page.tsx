@@ -206,15 +206,28 @@ export default function DataModelPage() {
             </p>
             <div className="space-y-3 pt-1">
               <Row term="Entry rule">
-                Positive 12-month momentum, trading within 30% of the 52-week
-                high, and RSI in a 25-55 <em>pullback</em> band (a dip within an
-                uptrend, not a crash). A stock passing all three becomes a pick.
+                A 12-month return above <strong>5%</strong> (a real winner, not
+                barely positive), trading within <strong>25%</strong> of the
+                52-week high, price above its 200-day average, and RSI in a{" "}
+                <strong>30-50</strong> <em>pullback</em> band (a dip within an
+                uptrend, not a crash). A stock passing all four becomes a pick.
               </Row>
               <Row term="Position sizing">
                 Picks are weighted <strong>inverse to their volatility</strong>,
                 so calmer stocks get a larger slice, capped at 2x an equal-weight
                 share so one very low-vol name can&apos;t dominate the book. Up
                 to <strong>15 positions</strong> at a time.
+              </Row>
+              <Row term="Concentration limits">
+                No single sector may exceed <strong>40%</strong> of the invested
+                book, and no single country outside the US may exceed{" "}
+                <strong>20%</strong>. Both work by trimming the oversized slice
+                and spreading it across the other holdings, so the limit only
+                bites when there is somewhere else to put the money — in a month
+                where nearly every qualifying stock is from one country, it
+                cannot help. Treat these as a guard against ordinary
+                over-concentration, not as protection against a market where
+                only one region qualifies.
               </Row>
               <Row term="Rebalance">
                 Monthly, matching the backtest exactly. A pick&apos;s weight
@@ -336,7 +349,12 @@ export default function DataModelPage() {
             <p className="text-xs text-gray-400">
               Note: sentiment history for the newer stocks in the universe is still
               being collected (the free data source allows ~25 requests per day), so
-              some names show neutral sentiment until their history fills in.
+              some names have no score yet — the emerging-markets group especially.
+              Where a score is missing the stock is treated as{" "}
+              <em>average</em> rather than as bad news, so a gap in the data can
+              never count against a stock. The historical Backtest page runs on
+              momentum alone for the same reason: sentiment history only starts in
+              2022 and does not yet cover enough of the universe to test fairly.
             </p>
           </Section>
 
@@ -381,7 +399,7 @@ export default function DataModelPage() {
             </p>
           </Section>
 
-          <Section id="universe" title="The universe: four groups of stocks" icon={GroupIcon}>
+          <Section id="universe" title="The universe: five groups of stocks" icon={GroupIcon}>
             <div className="space-y-3">
               <Row term="Core">
                 Around 58 large US companies (Apple, JPMorgan, Chevron...). The
@@ -397,13 +415,28 @@ export default function DataModelPage() {
                 Datadog, Axon). The most speculative story stocks are deliberately
                 excluded.
               </Row>
-              <Row term="Global">
-                Around 25 international leaders held via their US-listed ADR
-                (ASML, Novo Nordisk, TSMC, Toyota), plus five cheap European
-                quality names from the Lightman funds (Roche, Nestle, Danone,
-                KPN, DHL).
+              <Row term="Global (developed)">
+                Around 19 developed-market leaders outside the US, held via their
+                US-listed ADR (ASML, Novo Nordisk, Toyota, Sony), plus five cheap
+                European quality names from the Lightman funds (Roche, Nestle,
+                Danone, KPN, DHL).
+              </Row>
+              <Row term="Emerging Markets">
+                Around 25 emerging-market companies across 11 countries, again
+                only via US-listed ADRs (TSMC, Alibaba, HDFC Bank, Itau,
+                MercadoLibre, Gold Fields). Liquid large and mid caps only. Two
+                well-known names are deliberately absent: Tencent and Samsung
+                have no properly traded US listing, and their thinly-traded
+                stand-ins give unreliable prices.
               </Row>
             </div>
+            <p className="pt-1 text-xs text-gray-400">
+              Emerging markets are held for diversification rather than for
+              extra return. On the historical test they performed roughly in
+              line with the rest of the book, and because this test can only
+              include companies that still exist today, their real record is if
+              anything slightly flattered.
+            </p>
           </Section>
 
           <Section id="data-sources" title="Data sources and freshness" icon={PlugInIcon}>

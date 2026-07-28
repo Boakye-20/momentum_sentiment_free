@@ -440,12 +440,15 @@ with tab_screener:
         view = st.selectbox(
             "Strategy view",
             ["🌐 All stocks", "⭐ Top Value", "💎 Under the Radar",
-             "🚀 Momentum Leaders", "🌍 Global (ex-US)"],
+             "🚀 Momentum Leaders", "🌍 Global (ex-US)",
+             "🌏 Emerging Markets"],
             key="sc_view",
             help="Preset screens over the same scored universe. Top Value = "
                  "quality that's also cheap; Under the Radar = strong "
                  "fundamentals + cheap + quiet news; Momentum Leaders = "
-                 "top 12-1 momentum; Global = the ADR sleeve.",
+                 "top 12-1 momentum; Global (ex-US) = both ADR sleeves "
+                 "(developed + emerging); Emerging Markets = the EM sleeve "
+                 "only.",
         )
 
         # ── Filtered screener table ───────────────────────────────────────────
@@ -467,7 +470,13 @@ with tab_screener:
             filtered = (filtered[filtered["mom_12m"].notna()]
                         .sort_values("mom_12m", ascending=False).head(20))
         elif view == "🌍 Global (ex-US)" and "sleeve" in filtered.columns:
-            filtered = filtered[filtered["sleeve"] == "global"]
+            # Both ADR sleeves. This view predates the em sleeve, when TSM/
+            # BABA/MELI/etc all lived in `global` — filtering on "global"
+            # alone silently dropped 25 names from a view whose whole point
+            # is ex-US exposure.
+            filtered = filtered[filtered["sleeve"].isin(["global", "em"])]
+        elif view == "🌏 Emerging Markets" and "sleeve" in filtered.columns:
+            filtered = filtered[filtered["sleeve"] == "em"]
 
         tbl_hdr = st.container()
         tbl_hdr.markdown(
@@ -609,11 +618,13 @@ with tab_signals:
                     snap = av.fetch_today(list(px.columns))
                     if not snap.empty:
                         av.append_sentiment_rows(snap, source="alphavantage")
-                        sent_row = snap.set_index("ticker")["score"].reindex(px.columns).fillna(0)
+                        sent_row = sent_mod.neutral_fill(
+                            snap.set_index("ticker")["score"].reindex(px.columns))
                 else:
                     snap     = sent_mod.fetch_all_sentiment(list(px.columns))
                     sent_mod.log_sentiment(snap, source="free")
-                    sent_row = snap["score"].reindex(px.columns).fillna(0)
+                    sent_row = sent_mod.neutral_fill(
+                        snap["score"].reindex(px.columns))
             except Exception as e:
                 st.warning(f"Sentiment fetch failed ({e}); showing momentum-only.")
 

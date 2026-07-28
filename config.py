@@ -20,7 +20,7 @@ from typing import Dict, List
 # ──────────────────────────────────────────────────────────────────────────
 # Universe
 # ──────────────────────────────────────────────────────────────────────────
-# Three-sleeve universe design (core / quality-value / niche growth).
+# Five-sleeve universe design (core / quality-value / niche growth / global / em).
 # CORE keeps every ticker that already has Alpha Vantage sentiment history
 # banked — dropping one throws away weeks of fetched daily budget.
 SLEEVE_CORE: List[str] = [
@@ -80,10 +80,45 @@ SLEEVE_GLOBAL: List[str] = [
     # European value (Lightman holdings) via OTC ADRs — cheap + high ROE, but
     # thin Alpha Vantage sentiment coverage, so they lean on fundamentals.
     "RHHBY", "NSRGY", "DANOY", "KKPNY", "DHLGY",
-    # ── Asia ───────────────────────────────────────────────────────────────
-    "TSM", "SONY", "TM", "BABA", "INFY", "BHP",
+    # ── Developed Asia-Pacific ─────────────────────────────────────────────
+    "SONY", "TM", "BHP",
+]
+# NOTE: TSM/BABA/INFY/MELI/NU/VALE used to live here. They moved to
+# SLEEVE_EM so the EM-specific risk gates (country cap, volatility-adjusted
+# momentum) apply only to genuine emerging markets and not to developed
+# ex-US names like ASML or Toyota. Ticker symbols are unchanged, so banked
+# Alpha Vantage sentiment history for them is untouched.
+
+# Emerging markets via US-listed ADRs ONLY (same rule as SLEEVE_GLOBAL —
+# native listings break Alpha Vantage sentiment + yfinance fundamentals).
+# Liquid large/mid caps first, per the EM guidance: frontier and illiquid
+# names come later, if ever.
+#
+# Deliberate omissions despite being obvious EM bellwethers: Tencent (TCEHY)
+# and Samsung (SSNLF) have no liquid US ADR — both trade on pink sheets with
+# stale/erratic quotes, which is exactly the data-quality failure the
+# ADR-only rule exists to prevent. Their exposure comes indirectly through
+# the Taiwan/Korea semis and the China platform names below.
+SLEEVE_EM: List[str] = [
+    # ── Taiwan ─────────────────────────────────────────────────────────────
+    "TSM", "UMC", "ASX", "CHT",
+    # ── China ──────────────────────────────────────────────────────────────
+    "BABA", "PDD", "TCOM", "YUMC",
+    # ── India ──────────────────────────────────────────────────────────────
+    "HDB", "IBN", "INFY",
+    # ── South Korea ────────────────────────────────────────────────────────
+    "KB", "SHG",
     # ── Latin America ──────────────────────────────────────────────────────
-    "MELI", "NU", "VALE",
+    "MELI", "NU", "VALE", "GGB", "BAP", "SQM",
+    # ERJ (Embraer) was selected but DROPPED: yfinance returns
+    # YFTzMissingError for ERJ, ERJ.SA and EMBR3.SA alike, so there is no
+    # free price series for it despite the company trading normally. Re-add
+    # if the upstream data gap is ever fixed.
+    "ITUB", "PBR",           # Brazil — the two most liquid LatAm ADRs
+    "AMX", "FMX",            # Mexico
+    "CIB",                   # Colombia
+    # ── Africa ─────────────────────────────────────────────────────────────
+    "GFI",                   # South Africa
 ]
 
 SLEEVES: Dict[str, List[str]] = {
@@ -91,6 +126,7 @@ SLEEVES: Dict[str, List[str]] = {
     "quality_value": SLEEVE_QUALITY_VALUE,
     "niche_growth":  SLEEVE_NICHE_GROWTH,
     "global":        SLEEVE_GLOBAL,
+    "em":            SLEEVE_EM,
 }
 
 # Ticker -> sleeve name, for screener views and fetch prioritisation.
@@ -102,20 +138,31 @@ TICKER_SLEEVE: Dict[str, str] = {
 def av_fetch_order() -> List[str]:
     """Ticker order for the daily Alpha Vantage budget: quality-value and
     niche sleeves first — sentiment history is worth most where coverage is
-    thinnest — then global ADRs, then core (whose completed tickers cost
-    nothing anyway)."""
+    thinnest — then EM, then global ADRs, then core (whose completed tickers
+    cost nothing anyway).
+
+    EM has zero banked history so it is the thinnest sleeve of all, but it sits
+    BEHIND quality_value/niche deliberately: those two gate the separate
+    sentiment-overlay A/B (see scripts/coverage_check.py), and jumping EM ahead
+    would stall that for weeks. The EM A/B is momentum-only, so it does not
+    wait on sentiment coverage."""
     return (SLEEVE_QUALITY_VALUE + SLEEVE_NICHE_GROWTH
-            + SLEEVE_GLOBAL + SLEEVE_CORE)
+            + SLEEVE_EM + SLEEVE_GLOBAL + SLEEVE_CORE)
 
 
 @dataclass
 class UniverseConfig:
-    # Full four-sleeve universe (~132 names). Edit the sleeve lists above.
+    # Full five-sleeve universe (~156 names). Edit the sleeve lists above.
     tickers: List[str] = field(default_factory=lambda: (
         SLEEVE_CORE + SLEEVE_QUALITY_VALUE
-        + SLEEVE_NICHE_GROWTH + SLEEVE_GLOBAL
+        + SLEEVE_NICHE_GROWTH + SLEEVE_GLOBAL + SLEEVE_EM
     ))
     benchmark_ticker: str = "SPY"          # free ETF proxy for the market
+    # EM comparison benchmarks (free ETFs). EMXC/FRDM exclude China, which is
+    # the main axis of dispersion across EM funds — worth reporting separately
+    # rather than judging an EM sleeve against SPY alone.
+    em_benchmark_tickers: List[str] = field(
+        default_factory=lambda: ["EEM", "EMXC", "FRDM"])
     # Price window. end_date is dynamic (today) so the screener always shows
     # current prices — a hardcoded end once left the app 7 months stale.
     start_date: str = "2015-01-01"
@@ -146,6 +193,13 @@ class MomentumConfig:
     # rank on factor-residual momentum instead of raw TSM. Default False =
     # existing behaviour (spec suggests enabling; kept off for reproducibility).
     use_residual_momentum: bool = False
+    # EM guidance §9: rank on return/vol rather than raw return, because
+    # emerging-market and small-cap momentum is noisier than US large-cap
+    # momentum. Applied to RANKING ONLY, never to the `trend_tsm_min` gate —
+    # that threshold is denominated in return units (0.05 == "5% trailing
+    # return") and would mean something entirely different against a
+    # return/vol ratio. Default False = existing behaviour.
+    use_vol_adjusted_momentum: bool = False
 
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -230,6 +284,20 @@ class PortfolioConfig:
     # CHANGE SET 2 (Daniel & Moskowitz 2016, Momentum Crashes): cap long gross
     # at 0.3 when crash risk is elevated (bear market + rebound beginning).
     use_crash_risk_filter: bool = False
+    # EM guidance §9: cap any single country's share of gross long exposure, so
+    # one region's macro or policy shock (a China delisting scare, a Brazilian
+    # election) can't take the whole book with it. Applies to NON-US countries
+    # only — capping the US at 20% would rewrite the strategy rather than add
+    # an EM risk gate.
+    #
+    # Default TRUE after the A/B (scripts/em_ab_test.py, 2016-2026): the Sharpe
+    # gain is noise (+0.009), but the tail protection is not — unconstrained,
+    # Brazil reached 100% of gross long and China 31.5% in isolated months. It
+    # binds on only ~1.8% of days and never changes trade SELECTION (identical
+    # trade count, win rate, avg win and avg loss with it on) — it only
+    # reweights. Cheap insurance against a single-country blowup.
+    use_country_cap: bool = True
+    max_country_weight: float = 0.20
 
 
 @dataclass
@@ -301,6 +369,34 @@ SECTORS: Dict[str, str] = {
     **{t: "Energy" for t in ["SHEL", "BP", "TTE"]},
     **{t: "Consumer" for t in ["UL", "TM", "SONY", "BABA"]},
     **{t: "Materials" for t in ["RIO", "BHP", "VALE"]},
+    # ── EM sleeve ──────────────────────────────────────────────────────────
+    **{t: "Financials" for t in ["HDB", "IBN", "KB", "SHG", "BAP", "ITUB", "CIB"]},
+    **{t: "Semis" for t in ["UMC", "ASX"]},
+    **{t: "Tech" for t in ["CHT", "AMX"]},
+    **{t: "Growth" for t in ["PDD", "TCOM"]},
+    **{t: "Consumer" for t in ["YUMC", "FMX"]},
+    **{t: "Materials" for t in ["GGB", "SQM", "GFI"]},
+    **{t: "Energy" for t in ["PBR"]},
+}
+
+# Ticker -> country of primary economic exposure, for the optional country cap
+# (PortfolioConfig.use_country_cap). Only EM names need entries — everything
+# else resolves to "US" via .get(t, "US"), which is what keeps the cap from
+# binding on the developed book. Note these are exposure labels, not domiciles:
+# NU is Cayman-incorporated but a Brazilian bank, and MELI is Uruguay-HQ but
+# indexed as Argentina.
+COUNTRIES: Dict[str, str] = {
+    **{t: "Taiwan" for t in ["TSM", "UMC", "ASX", "CHT"]},
+    **{t: "China" for t in ["BABA", "PDD", "TCOM", "YUMC"]},
+    **{t: "India" for t in ["HDB", "IBN", "INFY"]},
+    **{t: "South Korea" for t in ["KB", "SHG"]},
+    **{t: "Brazil" for t in ["NU", "VALE", "GGB", "ITUB", "PBR"]},
+    **{t: "Mexico" for t in ["AMX", "FMX"]},
+    **{t: "Argentina" for t in ["MELI"]},
+    **{t: "Chile" for t in ["SQM"]},
+    **{t: "Peru" for t in ["BAP"]},
+    **{t: "Colombia" for t in ["CIB"]},
+    **{t: "South Africa" for t in ["GFI"]},
 }
 
 # Ticker -> human-readable company name (shared by both UIs).
@@ -354,6 +450,16 @@ TICKER_NAMES: Dict[str, str] = {
     "MELI": "MercadoLibre", "NU": "Nu Holdings", "VALE": "Vale",
     "RHHBY": "Roche", "NSRGY": "Nestle", "DANOY": "Danone",
     "KKPNY": "KPN", "DHLGY": "DHL Group",
+    # ── EM sleeve ──────────────────────────────────────────────────────────
+    "UMC": "United Microelectronics", "ASX": "ASE Technology",
+    "CHT": "Chunghwa Telecom", "PDD": "PDD Holdings",
+    "TCOM": "Trip.com", "YUMC": "Yum China",
+    "HDB": "HDFC Bank", "IBN": "ICICI Bank",
+    "KB": "KB Financial", "SHG": "Shinhan Financial",
+    "GGB": "Gerdau", "BAP": "Credicorp",
+    "SQM": "Sociedad Quimica y Minera", "ITUB": "Itau Unibanco",
+    "PBR": "Petrobras", "AMX": "America Movil",
+    "FMX": "FEMSA", "CIB": "Bancolombia", "GFI": "Gold Fields",
 }
 
 # Ticker -> name variants used to attribute free headlines to a stock.
@@ -505,4 +611,24 @@ COMPANY_KEYWORDS: Dict[str, List[str]] = {
     "DANOY": ["danone"],
     "KKPNY": ["kpn", "koninklijke kpn"],
     "DHLGY": ["dhl group", "deutsche post", "dhl express"],
+    # ── EM sleeve ──────────────────────────────────────────────────────────
+    "UMC":   ["united microelectronics", "umc"],
+    "ASX":   ["ase technology", "advanced semiconductor engineering"],
+    "CHT":   ["chunghwa telecom"],
+    "PDD":   ["pdd holdings", "pinduoduo", "temu"],
+    "TCOM":  ["trip.com", "ctrip", "skyscanner"],
+    "YUMC":  ["yum china", "kfc china"],
+    "HDB":   ["hdfc bank", "hdfc"],
+    "IBN":   ["icici bank", "icici"],
+    "KB":    ["kb financial", "kookmin bank"],
+    "SHG":   ["shinhan financial", "shinhan bank"],
+    "GGB":   ["gerdau"],
+    "BAP":   ["credicorp", "banco de credito del peru"],
+    "SQM":   ["sociedad quimica", "sqm lithium", "soquimich"],
+    "ITUB":  ["itau unibanco", "itau", "itaú"],
+    "PBR":   ["petrobras", "petroleo brasileiro"],
+    "AMX":   ["america movil", "américa móvil", "telcel"],
+    "FMX":   ["femsa", "fomento economico mexicano", "oxxo"],
+    "CIB":   ["bancolombia"],
+    "GFI":   ["gold fields"],
 }

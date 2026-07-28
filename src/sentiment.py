@@ -197,6 +197,25 @@ def log_sentiment(snapshot: pd.DataFrame, source: str = "free",
     return append_sentiment_rows(today, source=source, path=path)
 
 
+def neutral_fill(scores: pd.Series) -> pd.Series:
+    """Fill missing sentiment with the cross-sectional MEAN, not 0.0.
+
+    Zero is not neutral. News sentiment is mildly positive by nature (the AV
+    log: mean +0.169, 83.7% of scores above zero), so a 0.0 fill lands near the
+    17th percentile of the cross-section. Every consumer either z-scores this
+    (signals.weights_for_date's ranking tilt) or min-max normalises it
+    (scoring.py's 25%-weighted sentiment layer), so zero-filling actively
+    penalised any ticker WITHOUT data — which is the entire EM sleeve and all
+    the global ADRs, none of which have Alpha Vantage coverage yet.
+
+    Use this anywhere a sentiment Series is reindexed onto the universe. It
+    exists because the same bug was independently written four times: in the
+    backtest panel, the live bot, the API screener and the Streamlit console.
+    """
+    mean = scores.mean()
+    return scores.fillna(mean if pd.notna(mean) else 0.0)
+
+
 def load_sentiment_panel(
     trading_days: pd.DatetimeIndex,
     tickers: list[str],
@@ -208,6 +227,9 @@ def load_sentiment_panel(
     from logged history, forward-filled within a short window. `source` filters
     to one provider (e.g. 'alphavantage'); None blends all. Returns an all-zero
     panel if no history exists yet (so the backtest still runs).
+
+    MISSING IS NOT NEUTRAL — see the fill logic at the end. Only the backtest
+    calls this; the live screener scores sentiment through fetch_today().
     """
     path = path or CFG.paths.sentiment_log
     panel = pd.DataFrame(0.0, index=trading_days, columns=tickers)
@@ -222,4 +244,22 @@ def load_sentiment_panel(
                             aggfunc="mean")
     wide = wide.reindex(columns=tickers)
     wide = wide.reindex(trading_days.union(wide.index)).sort_index().ffill(limit=5)
-    return wide.reindex(trading_days).reindex(columns=tickers).fillna(0.0)
+    wide = wide.reindex(trading_days).reindex(columns=tickers)
+
+    # Fill gaps with each DAY's cross-sectional mean, NOT with 0.0.
+    #
+    # News sentiment is mildly positive by nature (this log: mean +0.169, 83.7%
+    # of scores above zero), so a 0.0 fill does not read as "neutral" — it lands
+    # near the 17th percentile of the cross-section, a ~1 sigma penalty. Since
+    # src/signals.py z-scores this panel to build the ranking tilt, that
+    # silently demoted every ticker with no Alpha Vantage coverage: measured at
+    # z = -0.97 for uncovered names vs +0.14 for covered ones, which meant the
+    # entire global and EM sleeves were ranked down for the crime of having no
+    # data. Cost ~0.9pp of backtest CAGR.
+    #
+    # A day with no data anywhere still falls back to 0.0 — a wholly flat panel
+    # is correctly inert (it contributes a zero z-score), and pre-2022-03 dates
+    # have no cross-section to be neutral relative to.
+    row_mean = wide.mean(axis=1)
+    wide = wide.apply(lambda col: col.fillna(row_mean))
+    return wide.fillna(0.0)

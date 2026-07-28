@@ -103,7 +103,7 @@ export default function JournalPage() {
                         <td className="px-5 py-3">{t.fill_price?.toFixed(2) ?? "-"}</td>
                         <td className="px-5 py-3">{t.fill_value?.toFixed(2) ?? "-"}</td>
                         <td className="px-5 py-3">
-                          <Badge size="sm" color={t.is_bot ? "brand" : "gray"}>
+                          <Badge size="sm" color={t.is_bot ? "primary" : "light"}>
                             {t.is_bot ? "Bot" : "Manual"}
                           </Badge>
                         </td>

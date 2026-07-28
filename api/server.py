@@ -71,7 +71,31 @@ def _clean(v):
     return v
 
 
+def _tradeable_cols(px: pd.DataFrame) -> pd.DataFrame:
+    """Restrict a price frame to the configured universe + the benchmark.
+
+    The price cache legitimately holds columns that are NOT tradeable stocks:
+    the EM comparison ETFs (EEM/EMXC/FRDM, see
+    UniverseConfig.em_benchmark_tickers) and any ticker since retired from a
+    sleeve. Every caller of _load_px treats a cache column as a stock, so
+    without this filter adding a benchmark to the cache silently turned it into
+    a screener row AND a backtest holding — EEM/EMXC/FRDM were being scored and
+    could have been recommended as picks.
+
+    Filtering once here (an intersection, not a drop-list) means a future cache
+    addition cannot leak in either.
+    """
+    keep = [t for t in list(CFG.universe.tickers)
+            + [CFG.universe.benchmark_ticker] if t in px.columns]
+    return px[keep]
+
+
 def _load_px() -> pd.DataFrame:
+    """Tradeable-universe prices. See _load_px_raw for the cache mechanics."""
+    return _tradeable_cols(_load_px_raw())
+
+
+def _load_px_raw() -> pd.DataFrame:
     """
     Load prices, keeping them CURRENT without ever fabricating data:
     1. If the cache is fresh (<=3 calendar days old) use it as-is.
@@ -145,9 +169,18 @@ def _build_screener() -> tuple[pd.DataFrame, pd.DataFrame]:
         if p.exists():
             hist = pd.read_csv(p, parse_dates=["date"])
             latest = hist.loc[hist.date == hist.date.max()]
-            df["sentiment_score"] = (
-                latest.groupby("ticker")["score"].mean().reindex(df.index).fillna(0)
-            )
+            scores = latest.groupby("ticker")["score"].mean().reindex(df.index)
+            # Missing sentiment means "average", not 0.0. scoring.py min-max
+            # normalises this column into a 25%-weighted layer of the AI Score,
+            # and news sentiment is mildly positive by nature (mean ~+0.17), so
+            # a 0.0 fill pinned every uncovered ticker to the BOTTOM of the
+            # sentiment layer. That silently depressed the displayed AI Score
+            # for all 25 EM names and all 19 global ADRs, none of which have
+            # Alpha Vantage coverage yet. Same fix as
+            # sentiment.load_sentiment_panel and executor.execute_trades.
+            mean = scores.mean()
+            df["sentiment_score"] = scores.fillna(
+                mean if pd.notna(mean) else 0.0)
     except Exception:
         pass
 

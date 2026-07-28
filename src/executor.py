@@ -139,11 +139,29 @@ def execute_trades(live: bool = False, override_capital: float = None):
         if p.exists():
             hist = pd.read_csv(p, parse_dates=["date"])
             latest = hist.loc[hist.date == hist.date.max()]
-            sent_row = latest.set_index("ticker")["score"].reindex(px.columns).fillna(0.0)
+            scores = latest.set_index("ticker")["score"].reindex(px.columns)
+            # Missing sentiment must mean "average", NOT 0.0. News sentiment is
+            # mildly positive by nature (mean ~+0.17), so a 0.0 fill sits near
+            # the 17th percentile and reads as bad news. signals.weights_for_date
+            # z-scores this row for its ranking tilt, so zero-filling actively
+            # demoted every ticker without Alpha Vantage coverage — which is the
+            # whole EM sleeve and all the global ADRs. Same bug as, and same fix
+            # as, sentiment.load_sentiment_panel.
+            mean = scores.mean()
+            sent_row = scores.fillna(mean if pd.notna(mean) else 0.0)
     except Exception:
         pass
         
-    w = signals.weights_for_date(today, px, panels, sentiment=sent_row, use_sentiment=True)
+    # use_sentiment must match CFG.backtest.use_sentiment_in_backtest (False),
+    # otherwise the bot trades a strategy the Backtest page never validated.
+    # Measured 2016-2026: the sentiment overlay is WORSE on every axis (Sharpe
+    # 1.195 vs 1.271, CAGR 25.33 vs 25.52, MaxDD -25.30 vs -23.36), because
+    # history only starts 2022-03 and covers 83/156 names with ZERO EM
+    # coverage. Turning this back on means opting into an unvalidated,
+    # coverage-biased signal — revisit only when AV backfill is broad enough
+    # and a fresh A/B actually favours it.
+    w = signals.weights_for_date(today, px, panels, sentiment=sent_row,
+                                 use_sentiment=CFG.backtest.use_sentiment_in_backtest)
     target_weights = w[w > 0]
     
     target_positions = {}

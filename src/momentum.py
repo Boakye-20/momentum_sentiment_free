@@ -126,6 +126,29 @@ def realised_vol(prices: pd.DataFrame, window: int | None = None) -> pd.DataFram
     return prices.pct_change().rolling(window, min_periods=window // 2).std()
 
 
+def vol_adj_tsm(prices: pd.DataFrame, lookback: int | None = None,
+                skip: int | None = None,
+                vol_window: int | None = None) -> pd.DataFrame:
+    """
+    Volatility-adjusted momentum: trailing return divided by realised vol.
+
+    A 40% gain on a 15%-vol name is a far stronger signal than the same 40% on
+    a 45%-vol name — the first is trend, the second is mostly noise. Dividing
+    by vol puts every name on a common "return per unit of risk" scale, which
+    matters most in emerging markets and small caps where raw momentum is
+    noisiest (EM guidance §9).
+
+    IMPORTANT: the output is a RATIO, not a return. It is safe to rank on, but
+    must never be compared against `trend_tsm_min` or any other threshold
+    denominated in return units — see src/signals.py.
+    """
+    raw = tsm(prices, lookback=lookback, skip=skip)
+    vol = realised_vol(prices, window=vol_window)
+    # Guard the divide: a zero-vol column (a flat/stale price series) would
+    # otherwise produce inf and dominate every ranking it appears in.
+    return raw / vol.replace(0.0, np.nan)
+
+
 def macd_hist(prices: pd.DataFrame, fast: int = 12, slow: int = 26,
               signal: int = 9) -> pd.DataFrame:
     """
@@ -246,8 +269,8 @@ def build_panels(prices: pd.DataFrame,
     Compute every momentum panel once, return a dict of wide frames.
 
     Core keys (always present, stable API — do not rename):
-      tsm, ratio52, rsi, ma_long, ma_short, vol, above_long_ma, regime,
-      macd_hist, momentum_quality, crash_risk, residual_tsm
+      tsm, vol_adj_tsm, ratio52, rsi, ma_long, ma_short, vol, above_long_ma,
+      regime, macd_hist, momentum_quality, crash_risk, residual_tsm
     `benchmark` (SPY prices) is optional to keep old call sites working:
     without it, crash_risk defaults to "normal" everywhere and residual_tsm
     falls back to the plain tsm panel.
@@ -281,8 +304,18 @@ def build_panels(prices: pd.DataFrame,
     else:
         residual = tsm_panel
 
+    # EM guidance §9: volatility-adjusted momentum. Cheap to compute (it reuses
+    # the tsm and realised_vol panels), but only meaningful when opted in;
+    # otherwise it falls back to plain tsm so the key is always present and
+    # downstream code never has to test for absence.
+    if getattr(CFG.momentum, "use_vol_adjusted_momentum", False):
+        vol_adj = vol_adj_tsm(prices)
+    else:
+        vol_adj = tsm_panel
+
     panels: dict[str, pd.DataFrame] = {
         "tsm":              tsm_panel,
+        "vol_adj_tsm":      vol_adj,
         "ratio52":          ratio_52w(prices),
         "rsi":              rsi(prices),
         "ma_long":          ma_long,

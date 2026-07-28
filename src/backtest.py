@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 import numpy as np
 import pandas as pd
 
-from config import CFG, SECTORS
+from config import CFG, COUNTRIES, SECTORS, TICKER_SLEEVE
 from src import momentum, signals, sentiment as sent_mod
 
 # No single sector may hold more than this share of gross long exposure.
@@ -73,6 +73,83 @@ def _apply_sector_cap(weights: pd.Series,
     return out
 
 
+def _apply_country_cap(weights: pd.Series,
+                       max_country: float | None = None) -> pd.Series:
+    """Cap any single NON-US country's share of gross long exposure.
+
+    EM guidance §9: one region's macro or policy shock — a China delisting
+    scare, a Brazilian election — should not be able to take the whole book
+    with it. Mechanically identical to `_apply_sector_cap`, including the
+    critical property that it renormalises back to the ORIGINAL gross and
+    never to 1.0, so it cannot silently undo the risk_off 0.5 brake.
+
+    The US is deliberately exempt. Capping it at 20% would not be an EM risk
+    gate, it would be a wholesale rewrite of a book that is ~80% US by
+    construction — every rebalance would breach and the cap would become the
+    dominant driver of allocation rather than a tail-risk guard.
+    """
+    max_country = (CFG.portfolio.max_country_weight
+                   if max_country is None else max_country)
+    longs = weights[weights > 0].copy()
+    if longs.empty:
+        return weights
+    gross = float(longs.sum())
+    countries = {t: COUNTRIES.get(t, "US") for t in longs.index}
+    limit = max_country * gross
+    for _ in range(10):                       # iterate to convergence
+        totals: dict[str, float] = {}
+        for t, w in longs.items():
+            totals[countries[t]] = totals.get(countries[t], 0.0) + w
+        breach = {c: v for c, v in totals.items()
+                  if c != "US" and v > limit + 1e-12}
+        if not breach:
+            break
+        for c, total in breach.items():
+            scale = limit / total
+            for t in longs.index:
+                if countries[t] == c:
+                    longs[t] *= scale
+        longs = gross * longs / longs.sum()   # preserve gross, never 1.0
+    out = weights.copy()
+    out[longs.index] = longs.values
+    return out
+
+
+def _em_exposure(weights: pd.DataFrame) -> dict:
+    """How much of the book the EM sleeve actually won.
+
+    This is instrumentation, not a performance metric, and it is what makes a
+    null A/B result interpretable. The LONG gate is calibrated on US large
+    caps: `near_floor_52w` demands price within 25% of the 52-week high, and
+    inverse-vol sizing scales ∝ 1/σ — both penalise high-vol EM names
+    mechanically rather than on merit. So "adding EM changed nothing" has two
+    very different possible causes, and only these numbers separate them:
+    EM was selected and didn't help, or EM was never selected at all.
+    """
+    em = [t for t in weights.columns if TICKER_SLEEVE.get(t) == "em"]
+    if not em:
+        return {"em_weight_share_pct": 0.0, "em_selection_rate_pct": 0.0,
+                "em_names_ever_held": 0}
+    longs = weights.clip(lower=0.0)
+    gross = longs.sum(axis=1)
+    live = gross > 0
+    if not live.any():
+        return {"em_weight_share_pct": 0.0, "em_selection_rate_pct": 0.0,
+                "em_names_ever_held": 0}
+    em_gross = longs[em].sum(axis=1)
+    share = float((em_gross[live] / gross[live]).mean() * 100)
+    # Selection rate: EM names held on an average day, as a share of the slots
+    # available. `max_positions` is the ceiling, so this reads as "EM won X%
+    # of the book's seats".
+    n_em_held = (longs[em] > 0).sum(axis=1)
+    rate = float(n_em_held[live].mean() / CFG.portfolio.max_positions * 100)
+    return {
+        "em_weight_share_pct": round(share, 2),
+        "em_selection_rate_pct": round(rate, 2),
+        "em_names_ever_held": int((longs[em] > 0).any().sum()),
+    }
+
+
 def _build_target_weights(prices, panels, sent_panel, use_sentiment) -> pd.DataFrame:
     rebals = _rebalance_dates(prices.index)
     rows = {}
@@ -88,6 +165,10 @@ def _build_target_weights(prices, panels, sent_panel, use_sentiment) -> pd.DataF
         w = signals.weights_for_date(d, prices, panels, sent_row, use_sentiment,
                                      prev_top=prev_top)
         w = _apply_sector_cap(w)
+        # EM guidance §9 country cap, applied AFTER the sector cap so the
+        # sector constraint stays the binding one in the developed book.
+        if getattr(CFG.portfolio, "use_country_cap", False):
+            w = _apply_country_cap(w)
         rows[d] = w
         prev_top = w[w > 0].index.tolist()
     if not rows:
@@ -198,7 +279,7 @@ def _duration_analytics(trades: pd.DataFrame, equity: pd.Series) -> dict:
             "hold_returns": hold_returns}
 
 
-def _metrics(equity, benchmark, daily, trades) -> dict:
+def _metrics(equity, benchmark, daily, trades, weights=None) -> dict:
     n_years = (equity.index[-1] - equity.index[0]).days / 365.25
     total = equity.iloc[-1] / equity.iloc[0] - 1
     cagr = (1 + total) ** (1 / n_years) - 1 if n_years > 0 else 0.0
@@ -226,7 +307,9 @@ def _metrics(equity, benchmark, daily, trades) -> dict:
         info_ratio = float(active.mean() * 252 / te) if te > 0 else 0.0
 
     win = (trades["return_pct"] > 0).mean() if len(trades) else 0.0
+    em = _em_exposure(weights) if weights is not None else {}
     return {
+        **em,
         "total_return_pct": round(total * 100, 2),
         "cagr_pct": round(cagr * 100, 2),
         "benchmark_cagr_pct": round(b_cagr * 100, 2),
@@ -387,7 +470,7 @@ def run_backtest(prices: pd.DataFrame, benchmark: pd.Series,
     bench.name = "benchmark"
 
     trades = _trades_from_weights(eff.loc[live:], prices.loc[live:])
-    metrics = _metrics(equity, bench, net, trades)
+    metrics = _metrics(equity, bench, net, trades, weights=eff.loc[live:])
     duration = _duration_analytics(trades, equity)
     wf = _purged_walk_forward(equity, bench)
 
