@@ -6,7 +6,7 @@ import Sparkline from "./Sparkline";
 import ScoreBar from "./ScoreBar";
 import RadarTag from "./RadarTag";
 import Copilot from "./Copilot";
-import { fetchScreener, fmtPct, sleeveLabel, Stock } from "@/lib/api";
+import { fetchScreener, fmtPct, fmtNum, sleeveLabel, Stock } from "@/lib/api";
 
 const VIEWS = [
   "All stocks",
@@ -187,7 +187,7 @@ export default function ScreenerDashboard() {
             <div className="mt-3 flex items-end justify-between">
               <div>
                 <p className="text-lg font-bold text-gray-800 dark:text-white/90">
-                  {s.last_price.toFixed(2)}
+                  {fmtNum(s.last_price)}
                 </p>
                 <p
                   className={`text-xs font-medium ${
@@ -314,7 +314,7 @@ export default function ScreenerDashboard() {
                     {fmtPct(periodReturn(s))}
                   </td>
                   <td className="px-5 py-3 text-gray-700 dark:text-gray-300">
-                    {s.last_price.toFixed(2)}
+                    {fmtNum(s.last_price)}
                   </td>
                   <td className="px-5 py-3">
                     <Sparkline data={s.price_trend.slice(-PERIODS[period])} />

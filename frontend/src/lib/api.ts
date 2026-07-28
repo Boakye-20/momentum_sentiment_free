@@ -6,7 +6,12 @@ export interface StockBase {
   name?: string;
   sector: string;
   sleeve: string;
-  last_price: number;
+  // Nullable. This was typed `number` and it was a lie: the API emits null
+  // whenever a ticker's price series is empty (a transient yfinance failure
+  // can wipe one column), and the wrong type meant `s.last_price.toFixed(2)`
+  // typechecked cleanly and then crashed the whole Browse page at runtime for
+  // every user. Keep it nullable so the compiler finds unguarded uses.
+  last_price: number | null;
   mom_12m: number | null;
   ratio_52w: number | null;
   rsi: number | null;

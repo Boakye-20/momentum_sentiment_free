@@ -169,9 +169,25 @@ def load_prices(
         if cache.exists():
             try:
                 old = pd.read_parquet(cache)
+                # Columns the cache has and this fetch didn't ask for.
                 keep = [c for c in old.columns if c not in prices.columns]
-                if keep:
-                    out = prices.join(old[keep], how="outer").sort_index()
+                # Columns this fetch returned COMPLETELY EMPTY while the cache
+                # holds real data. yfinance fails transiently on individual
+                # tickers inside a bulk request and hands back an all-NaN
+                # column; treating that as "fresh" silently destroyed VALE's
+                # entire 11-year history. A failed fetch must never beat good
+                # cached data — better stale than empty.
+                dead = [c for c in prices.columns
+                        if c in old.columns
+                        and prices[c].notna().sum() == 0
+                        and old[c].notna().sum() > 0]
+                if dead:
+                    print(f"[data] fetch returned no data for {dead} — keeping "
+                          "cached history for those tickers.")
+                restore = keep + dead
+                if restore:
+                    out = (prices.drop(columns=dead)
+                           .join(old[restore], how="outer").sort_index())
             except Exception as e:
                 print(f"[data] could not merge existing cache ({e}); "
                       "writing fetched columns only.")

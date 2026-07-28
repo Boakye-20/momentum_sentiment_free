@@ -83,7 +83,7 @@ export default function StockPage() {
         <div className="col-span-12 rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03] xl:col-span-8">
           <div className="mb-2 flex items-baseline gap-3">
             <p className="text-2xl font-bold text-gray-800 dark:text-white/90">
-              {d.last_price.toFixed(2)}
+              {fmtNum(d.last_price)}
             </p>
             <p
               className={`text-sm font-medium ${

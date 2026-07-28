@@ -6,6 +6,7 @@ import {
   fetchScreener,
   fetchPortfolio,
   sleeveLabel,
+  fmtNum,
   SLEEVE_ORDER,
   Stock,
 } from "@/lib/api";
@@ -27,7 +28,7 @@ function Card({ s }: { s: Row }) {
     >
       <div className="mb-1 flex items-baseline justify-between">
         <span className="font-semibold text-gray-800 dark:text-white/90">{s.ticker}</span>
-        <span className="text-sm text-gray-500 dark:text-gray-400">{s.last_price.toFixed(2)}</span>
+        <span className="text-sm text-gray-500 dark:text-gray-400">{fmtNum(s.last_price)}</span>
       </div>
       {s.name && <p className="mb-2 truncate text-xs text-gray-400">{s.name}</p>}
       <div className="mb-2 flex items-center justify-between">
