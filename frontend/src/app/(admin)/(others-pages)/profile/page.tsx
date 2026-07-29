@@ -230,28 +230,18 @@ export default function DataModelPage() {
                 only one region qualifies.
               </Row>
               <Row term="Rebalance">
-                <strong>Monthly, and this matters more than it sounds.</strong>{" "}
-                The list on screen is recalculated every day, but it is only
-                meant to be <em>acted on</em> once a month. Holding a position
-                for around five weeks is not a side effect of the strategy, it
-                is how it makes money: momentum needs weeks to pay out. Trading
-                the daily changes instead turns a backtested +25.6% a year into
-                roughly <strong>0%</strong>, because you pay costs on every
-                wobble and sell winners before they run. A pick&apos;s weight
-                shown on Signals, Portfolio and Journal is the % of your entered
-                capital the strategy would allocate to it today.
+                <strong>Monthly.</strong> The list refreshes daily but is only
+                meant to be acted on once a month — trading the daily changes
+                turns a backtested +25.6% a year into roughly 0%. A pick&apos;s
+                weight is the % of your capital the strategy would allocate to
+                it today.
               </Row>
               <Row term="Not picked">
-                A stock missing from the Signal Book does not currently meet the
-                entry filter&apos;s momentum/RSI/52-week conditions. It is not
-                blacklisted and can reappear later.{" "}
-                <strong>
-                  Seeing &quot;not picked&quot; on a random day is not a sell
-                  signal
-                </strong>{" "}
-                — stocks sitting near the edge of the RSI band drop on and off
-                the list constantly. Only the status on your monthly review day
-                counts.
+                The stock does not currently meet the entry conditions. It is
+                not blacklisted and can reappear.{" "}
+                <strong>On a random day this is not a sell signal</strong> —
+                names near the RSI band edge drop on and off constantly. Only
+                your review day counts.
               </Row>
             </div>
           </Section>
@@ -273,13 +263,11 @@ export default function DataModelPage() {
                 bought it. The strategy still wants this position.
               </Row>
               <Row term="Not picked anymore?">
-                <em>On your review day</em>, that is the mechanical exit signal:
-                it no longer meets the entry filter&apos;s conditions. Sell it
-                and put the freed capital into a current pick you do not already
-                own. On any other day, ignore it — a stock can drop off and
-                rejoin the list several times inside one month, and selling each
-                time is the single most expensive mistake you can make with this
-                strategy.
+                <em>On your review day</em>, that is the exit signal: sell it and
+                put the capital into a current pick you don&apos;t own. On any
+                other day, ignore it — a stock can leave and rejoin the list
+                several times in a month, and selling each time is the most
+                expensive mistake available here.
               </Row>
               <Row term="No blacklist">
                 A stock that drops off the list is not banned. If it re-qualifies
@@ -287,35 +275,25 @@ export default function DataModelPage() {
                 you can buy back in then.
               </Row>
               <Row term="Email alert">
-                A daily check compares your Trading212 holdings against the
-                Signal Book and emails you if a position has dropped off.{" "}
-                <strong>Treat it as information, not an instruction.</strong>{" "}
-                It tells you something moved; it does not mean sell today. If
-                the same name is still off the list on your review day, that is
-                when you act.
+                A daily check emails you if a holding drops off the Signal Book.{" "}
+                <strong>Information, not an instruction</strong> — act only if
+                it is still off the list on your review day.
               </Row>
               <Row term="The automated bot">
-                If you run the Trading212 bot, it already enforces all of this.
-                It wakes up every morning but only actually trades once a month,
-                then holds. On every other day it prints what it would do and
-                deliberately does nothing. It also ignores adjustments smaller
-                than about 0.5% of your book, which are not worth the trading
-                cost.
+                It enforces all of this for you: it runs every morning but only
+                trades once a month, holding otherwise, and skips adjustments
+                under ~0.5% of your book.
               </Row>
             </div>
             <p>
-              The roughly 30-day holding period you see in the backtest is not a
-              fixed rule. It is simply a result of reviewing monthly: the
-              shortest a position can last is one month, and a strong stock is
-              held for as many months as it keeps qualifying.
+              The roughly 30-day holding period in the backtest is not a fixed
+              rule — it just falls out of reviewing monthly, and a strong stock
+              is held for as many months as it keeps qualifying.
             </p>
             <p className="text-xs text-gray-400">
-              Why this is laboured: the same strategy tested at different review
-              frequencies gives wildly different results. Monthly returns about
-              25.6% a year with a 23% worst-case fall. Weekly roughly halves
-              that. Daily gives about 0% a year with a 42% fall — the edge is
-              entirely eaten by costs and by selling too early. The review
-              frequency is not a detail, it is most of the strategy.
+              Why the review frequency matters so much: identical rules, tested
+              monthly, return ~25.6% a year with a 23% worst-case fall. Weekly
+              roughly halves that. Daily gives ~0% with a 42% fall.
             </p>
           </Section>
 
