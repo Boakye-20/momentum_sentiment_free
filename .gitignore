@@ -27,3 +27,8 @@ SOP Memory
 edits
 transcript
 transcript *
+
+# Live bot runtime state. Machine-local on purpose: a clone inheriting
+# another machine rebalance history could wrongly believe this period was
+# already traded and skip a rebalance.
+data/bot_state.json

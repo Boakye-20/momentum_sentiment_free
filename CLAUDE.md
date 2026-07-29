@@ -94,6 +94,34 @@ If anyone proposes mid-month exits, weekly rebalancing, or "just react when a
 holding drops off", the numbers above are the answer. Any such change needs its
 own A/B before it goes live.
 
+## Adding a sleeve: the checklist
+
+Adding `em` broke three separate things that all typechecked and ran fine. A
+sleeve is not just a list in `config.py` — several places hardcode the set of
+sleeves, and each fails silently.
+
+1. `config.py` — the ticker list, `SLEEVES`, `av_fetch_order()`,
+   `UniverseConfig.tickers`, and entries in `SECTORS`, `TICKER_NAMES`,
+   `COMPANY_KEYWORDS` (and `COUNTRIES` if non-US). A missing map entry degrades
+   silently rather than erroring.
+2. `frontend/src/lib/api.ts` — **both** `SLEEVE_ORDER` and `SLEEVE_LABELS`.
+   Miss `SLEEVE_ORDER` and Browse renders the stocks with no filter chip (the
+   `extra` fallback hides it). Miss `SLEEVE_LABELS` and the chip title-cases
+   the raw key, e.g. "Em".
+3. `dashboard.py` — the Streamlit "Strategy view" selectbox filters on literal
+   sleeve names. `"🌍 Global (ex-US)"` silently lost 25 names when they moved
+   out of `global`.
+4. **The Data & Model page prose** — `frontend/src/app/(admin)/(others-pages)/profile/page.tsx`
+   lists the group tabs and the universe groups in plain English. No code
+   search finds these; only reading the page does.
+5. `api/server.py` — nothing to change, but confirm the new tickers appear in
+   `/api/screener` and that no non-tradeable ticker leaked in (see
+   `_tradeable_cols`).
+
+Verify by **loading the page and reading it**, not by grepping. Two of the
+three bugs above were invisible to `grep` because they were prose or a
+fallback path.
+
 ## ALWAYS update the Data & Model page
 
 `frontend/src/app/(admin)/(others-pages)/profile/page.tsx` (component
