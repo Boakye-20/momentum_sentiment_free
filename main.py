@@ -106,7 +106,8 @@ def cmd_fetch_av(args):
 def cmd_execute_trades(args):
     """Execute target trades in Trading212."""
     from src.executor import execute_trades
-    execute_trades(live=args.live, override_capital=args.capital)
+    execute_trades(live=args.live, override_capital=args.capital,
+                   force=getattr(args, "force", False))
 
 
 def build_parser():
@@ -141,6 +142,10 @@ def build_parser():
     e = sub.add_parser("execute-trades", help="place automated orders in Trading212")
     e.add_argument("--live", action="store_true", help="actually place the trades (default is dry-run)")
     e.add_argument("--capital", type=float, default=None, help="override the account value for sizing")
+    e.add_argument("--force", action="store_true",
+                   help="rebalance even if this period was already traded "
+                        "(the bot normally acts once per CFG.portfolio.rebalance "
+                        "period — daily trading destroys the backtested edge)")
     e.set_defaults(func=cmd_execute_trades)
     return p
 

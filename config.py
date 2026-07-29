@@ -299,6 +299,18 @@ class PortfolioConfig:
     use_country_cap: bool = True
     max_country_weight: float = 0.20
 
+    # ---- LIVE EXECUTION ONLY (src/executor.py) — the backtest ignores this ----
+    # Minimum trade size, as a fraction of book value. The executor used to fire
+    # an order on any delta above 0.01 SHARES, so ordinary daily price drift
+    # generated round-trips that were pure spread. 0.5% of a £50k book ≈ £250.
+    # Full exits (target weight 0) bypass this — otherwise dust accumulates
+    # permanently.
+    #
+    # Note the REBALANCE CADENCE is deliberately NOT a separate setting: the bot
+    # derives it from `rebalance` above, so the backtest and live trading can
+    # never silently diverge again (they had — backtest monthly, bot daily).
+    min_trade_pct_of_book: float = 0.005
+
 
 @dataclass
 class BacktestConfig:

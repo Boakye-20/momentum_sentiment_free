@@ -18,6 +18,93 @@ from src.data import load_prices
 
 logger = logging.getLogger(__name__)
 
+
+# ──────────────────────────────────────────────────────────────────────────
+# Rebalance gate
+# ──────────────────────────────────────────────────────────────────────────
+# The scheduled task runs this bot EVERY morning, but the strategy is a
+# monthly-rebalance strategy. Acting daily is not a milder version of it — it
+# is a different, far worse strategy. Measured 2016-2026, same rules, only the
+# cadence changed:
+#
+#     monthly : CAGR +25.61%  Sharpe 1.275  MaxDD -23.4%   37d hold   19x turnover
+#     weekly  : CAGR +13.60%  Sharpe 0.756  MaxDD -25.7%   11d hold   64x turnover
+#     daily   : CAGR  -0.29%  Sharpe 0.077  MaxDD -41.7%    4d hold  192x turnover
+#
+# The ~37-day average hold is the MECHANISM, not a side effect: momentum needs
+# weeks to pay out, and the entry rule's RSI band makes names flicker in and out
+# of the book day to day. So we keep running daily (a missed day then heals
+# itself) but only ACT once per rebalance period.
+#
+# Why a period-CHANGE test rather than "is today month-end": backtest's
+# _rebalance_dates() does groupby(period).last(), which for the current,
+# incomplete month returns the latest bar — i.e. today. Reusing it live would
+# mark every single day a rebalance day, which is precisely the bug. Detecting
+# the true last trading day of a month needs a forward market calendar we do
+# not have.
+#
+# Acting on the first run of a NEW period is equivalent to the backtest, not a
+# compromise: the backtest computes weights at month-end close and executes
+# shift(execution_delay_days=1) — the first trading day of the next month. The
+# 08:30 run sees px.index[-1] = the month-end close and places orders that fill
+# that same first trading day.
+_STATE_FILE = "bot_state.json"
+
+
+def _state_path() -> str:
+    return os.path.join(CFG.paths.data_dir, _STATE_FILE)
+
+
+def _load_state() -> dict:
+    try:
+        with open(_state_path(), "r") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def _save_state(state: dict) -> None:
+    try:
+        os.makedirs(CFG.paths.data_dir, exist_ok=True)
+        with open(_state_path(), "w") as f:
+            json.dump(state, f, indent=2)
+    except Exception as e:
+        print(f"[Warn] Could not write {_state_path()}: {e}")
+
+
+def _current_period(ts) -> str:
+    """The rebalance period `ts` falls in, per CFG.portfolio.rebalance."""
+    return str(pd.Timestamp(ts).to_period(CFG.portfolio.rebalance))
+
+
+def should_rebalance(today, force: bool = False) -> tuple[bool, str]:
+    """(may_trade, human-readable reason).
+
+    No stored state means first run ever -> rebalance, so deploying this aligns
+    the book immediately instead of waiting up to a month.
+    """
+    period = _current_period(today)
+    if force:
+        return True, f"--force: rebalancing in period {period}"
+    last = _load_state().get("last_rebalance_period")
+    if last is None:
+        return True, f"no previous rebalance recorded -> rebalancing ({period})"
+    if last == period:
+        return False, (f"already rebalanced in {period} — holding. "
+                       f"Next rebalance when the {CFG.portfolio.rebalance} "
+                       f"period rolls over.")
+    return True, f"new period {period} (last was {last}) -> rebalancing"
+
+
+def _record_rebalance(today) -> None:
+    """Called ONLY after a live run actually placed orders. A dry run or a
+    crashed run must not consume the period."""
+    state = _load_state()
+    state["last_rebalance_period"] = _current_period(today)
+    state["last_rebalance_date"] = str(pd.Timestamp(today).date())
+    _save_state(state)
+
+
 class Trading212Client:
     def __init__(self, key: str, secret: str = "", env: str = "demo"):
         self.host = "demo" if env.lower() == "demo" else "live"
@@ -90,10 +177,16 @@ def _get_t212_ticker(sym: str, instruments: list, current_positions: list) -> st
     return f"{sym}_US_EQ"
 
 
-def execute_trades(live: bool = False, override_capital: float = None):
+def execute_trades(live: bool = False, override_capital: float = None,
+                   force: bool = False):
     """
     Computes delta between target portfolio and current T212 portfolio,
     and places market orders to align them.
+
+    Only places orders once per CFG.portfolio.rebalance period (see the
+    rebalance-gate notes at the top of this module) — `force=True` overrides.
+    The trade plan is always computed and printed so drift stays visible even
+    on a held day.
     """
     from dotenv import load_dotenv
     load_dotenv(override=True)
@@ -201,31 +294,53 @@ def execute_trades(live: bool = False, override_capital: float = None):
     # 4. Calculate Delta & Generate Trades
     print("\n--- Trade Plan ---")
     trades_to_execute = []
-    
+
+    # No-trade band: ignore adjustments too small to be worth the spread. A
+    # full EXIT is never banded (target_qty == 0) or dust positions would live
+    # forever. See CFG.portfolio.min_trade_pct_of_book.
+    min_notional = capital * getattr(
+        CFG.portfolio, "min_trade_pct_of_book", 0.0)
+    skipped_small = []
+
+    def _too_small(sym: str, delta_qty: float, is_exit: bool) -> bool:
+        if is_exit or min_notional <= 0:
+            return False
+        price = float(px[sym].iloc[-1]) if sym in px.columns else 0.0
+        notional = abs(delta_qty) * price
+        if notional < min_notional:
+            skipped_small.append((sym, notional))
+            return True
+        return False
+
     # Process Sells (Stocks we hold but aren't in target, or hold too much of)
     for sym, current in current_portfolio.items():
         if sym not in px.columns:
             continue
-            
+
         target_qty = target_positions.get(sym, {}).get("target_qty", 0)
         delta_qty = target_qty - current["qty"]
-        
+
         # If we need to sell (delta is negative)
         if delta_qty < -0.01:
+            is_exit = target_qty <= 0
+            if _too_small(sym, delta_qty, is_exit):
+                continue
             trades_to_execute.append({
                 "ticker": sym,
                 "t212_ticker": current["t212_ticker"],
                 "side": "SELL",
-                "qty": delta_qty, 
+                "qty": delta_qty,
                 "reason": "Reduce/Exit" if target_qty > 0 else "Exit Position"
             })
-            
+
     # Process Buys (Stocks in target we don't hold enough of)
     for sym, target in target_positions.items():
         current_qty = current_portfolio.get(sym, {}).get("qty", 0)
         delta_qty = target["target_qty"] - current_qty
-        
+
         if delta_qty > 0.01:
+            if _too_small(sym, delta_qty, is_exit=False):
+                continue
             t212_ticker = _get_t212_ticker(sym, instruments, current_t212)
             trades_to_execute.append({
                 "ticker": sym,
@@ -234,23 +349,39 @@ def execute_trades(live: bool = False, override_capital: float = None):
                 "qty": delta_qty,
                 "reason": "New Position" if current_qty == 0 else "Increase Position"
             })
-            
+
+    if skipped_small:
+        print(f"({len(skipped_small)} adjustment(s) below the £{min_notional:,.0f} "
+              f"no-trade band, skipped: "
+              f"{', '.join(f'{s} £{n:,.0f}' for s, n in skipped_small[:6])}"
+              f"{' ...' if len(skipped_small) > 6 else ''})")
+
     if not trades_to_execute:
         print("Portfolio is perfectly aligned. No trades needed.")
         return
-        
+
     # Sort trades: Sells first, then Buys to free up cash
     trades_to_execute.sort(key=lambda x: 0 if x["side"] == "SELL" else 1)
     
     for t in trades_to_execute:
         print(f"{t['side']:<4} {t['ticker']:<5} | Qty: {abs(t['qty']):>8.4f} | {t['reason']}")
         
-    # 5. Execute Trades
+    # 5. Rebalance gate — the plan above is informational on a held day.
+    may_trade, reason = should_rebalance(today, force=force)
+    print(f"\nRebalance gate ({CFG.portfolio.rebalance}): {reason}")
+    if not may_trade:
+        print("[HOLDING] No orders placed. The backtest holds between "
+              "rebalances too — trading this drift daily is what turns "
+              "+25.6% CAGR into -0.3%. Use --force to override.")
+        return
+
+    # 6. Execute Trades
     if not live:
         print("\n[DRY RUN] No orders placed. Run with --live to execute.")
         return
-        
+
     print("\n--- Executing Trades ---")
+    placed = 0
     for t in trades_to_execute:
         print(f"Submitting {t['side']} for {t['ticker']} (Qty: {t['qty']:.4f})...", end=" ", flush=True)
         try:
@@ -280,6 +411,7 @@ def execute_trades(live: bool = False, override_capital: float = None):
                 continue
                 
             if order_id:
+                placed += 1
                 try:
                     bot_file = os.path.join(CFG.paths.data_dir, "bot_orders.json")
                     bot_orders = []
@@ -296,7 +428,17 @@ def execute_trades(live: bool = False, override_capital: float = None):
         except Exception as e:
             print(f"FAILED: {e}")
             
-    print("\nExecution complete.")
+    # Consume the period only if orders actually went through. A run that
+    # placed nothing (every order failed) must be retried tomorrow, not
+    # silently counted as this month's rebalance.
+    if placed:
+        _record_rebalance(today)
+        print(f"\nExecution complete — {placed} order(s) placed. "
+              f"Rebalance recorded for period {_current_period(today)}.")
+    else:
+        print("\nExecution complete — NO orders placed, so the rebalance was "
+              "NOT recorded. The next run will retry.")
+
 
 if __name__ == "__main__":
     execute_trades()
