@@ -197,259 +197,219 @@ export default function DataModelPage() {
         <div ref={contentRef} className="space-y-6">
           <Section id="signal-book" title="The Signal Book: the one rating system in this app" icon={BoltIcon}>
             <p>
-              Every page in this app, Browse, Signals, Portfolio, Journal and
-              Backtest, is built around a <strong>single, rules-based
-              system</strong>: the Signal Book. It is exactly what the Backtest
-              page&apos;s numbers (CAGR, Sharpe) measure, so there is one
-              consistent answer to &quot;does this stock currently qualify&quot;
-              everywhere you look.
+              Every page is built on one rules-based system: the Signal Book.
+              It is exactly what the Backtest page&apos;s numbers measure, so
+              &quot;does this stock qualify&quot; has one answer everywhere.
             </p>
             <div className="space-y-3 pt-1">
               <Row term="Entry rule">
-                A 12-month return above <strong>5%</strong> (a real winner, not
-                barely positive), trading within <strong>25%</strong> of the
-                52-week high, price above its 200-day average, and RSI in a{" "}
-                <strong>30-50</strong> <em>pullback</em> band (a dip within an
-                uptrend, not a crash). A stock passing all four becomes a pick.
+                12-month return above <strong>5%</strong>, within{" "}
+                <strong>25%</strong> of the 52-week high, price above its
+                200-day average, and RSI <strong>30-50</strong> (a dip in an
+                uptrend, not a crash). All four required.
               </Row>
               <Row term="Position sizing">
-                Picks are weighted <strong>inverse to their volatility</strong>,
-                so calmer stocks get a larger slice, capped at 2x an equal-weight
-                share so one very low-vol name can&apos;t dominate the book. Up
-                to <strong>15 positions</strong> at a time.
+                Weighted <strong>inverse to volatility</strong>, so calmer
+                stocks get a larger slice, capped at 2x equal weight. Up to{" "}
+                <strong>15 positions</strong>.
               </Row>
               <Row term="Concentration limits">
-                No single sector may exceed <strong>40%</strong> of the invested
-                book, and no single country outside the US may exceed{" "}
-                <strong>20%</strong>. Both work by trimming the oversized slice
-                and spreading it across the other holdings, so the limit only
-                bites when there is somewhere else to put the money — in a month
-                where nearly every qualifying stock is from one country, it
-                cannot help. Treat these as a guard against ordinary
-                over-concentration, not as protection against a market where
-                only one region qualifies.
+                No sector above <strong>40%</strong> of the book, no non-US
+                country above <strong>20%</strong>. Both trim the oversized
+                slice and spread it across the other holdings, so they only bite
+                when there is somewhere else to put the money. In a month where
+                nearly every pick comes from one country, they cannot help.
               </Row>
               <Row term="Rebalance">
                 <strong>Monthly.</strong> The list refreshes daily but is only
-                meant to be acted on once a month — trading the daily changes
+                meant to be acted on once a month. Trading the daily changes
                 turns a backtested +25.6% a year into roughly 0%. A pick&apos;s
-                weight is the % of your capital the strategy would allocate to
-                it today.
+                weight is the % of your capital allocated to it.
               </Row>
               <Row term="Not picked">
-                The stock does not currently meet the entry conditions. It is
-                not blacklisted and can reappear.{" "}
-                <strong>On a random day this is not a sell signal</strong> —
-                names near the RSI band edge drop on and off constantly. Only
-                your review day counts.
+                Does not meet the entry conditions today. Not blacklisted, and
+                can reappear.{" "}
+                <strong>On a random day this is not a sell signal</strong>:
+                names near the RSI edge drop on and off constantly. Only your
+                review day counts.
               </Row>
             </div>
           </Section>
 
           <Section id="when-to-sell" title="When to sell" icon={AlertIcon}>
             <p>
-              There is no separate SELL button, on purpose: the model tells you
-              what currently qualifies, and selling is a rule you check on a
-              schedule, not a labelled alert. The routine that matches the
-              backtest exactly is a <strong>monthly review</strong>. Pick one day
-              a month and, for every stock you hold, check its current Signal
-              Book status, shown directly on <strong>Portfolio</strong> and{" "}
-              <strong>Journal</strong> (or look it up on <strong>Signals</strong>):
+              There is no SELL button by design: selling is a rule you check on
+              a schedule. The routine that matches the backtest is a{" "}
+              <strong>monthly review</strong>. Pick one day a month and check
+              each holding&apos;s status on <strong>Portfolio</strong> or{" "}
+              <strong>Journal</strong>:
             </p>
             <div className="space-y-3 pt-1">
               <Row term="Still a pick?">
-                If it still appears in the Signal Book (any weight greater than
-                0%), keep holding, even if its weight has changed since you
-                bought it. The strategy still wants this position.
+                Any weight above 0% means keep holding, even if the weight has
+                changed since you bought it.
               </Row>
               <Row term="Not picked anymore?">
-                <em>On your review day</em>, that is the exit signal: sell it and
-                put the capital into a current pick you don&apos;t own. On any
-                other day, ignore it — a stock can leave and rejoin the list
-                several times in a month, and selling each time is the most
-                expensive mistake available here.
+                <em>On your review day</em>, that is the exit signal: sell and
+                rotate into a current pick you don&apos;t own. On any other day,
+                ignore it. A stock can leave and rejoin several times in a month,
+                and selling each time is the most expensive mistake available
+                here.
               </Row>
               <Row term="No blacklist">
-                A stock that drops off the list is not banned. If it re-qualifies
-                on a later monthly review, the Signal Book will pick it again and
-                you can buy back in then.
+                Dropping off is not a ban. If it re-qualifies on a later
+                review, the Signal Book picks it again.
               </Row>
               <Row term="Email alert">
-                A daily check emails you if a holding drops off the Signal Book.{" "}
-                <strong>Information, not an instruction</strong> — act only if
-                it is still off the list on your review day.
+                A daily check emails you if a holding drops off.{" "}
+                <strong>Information, not an instruction</strong>: act only if it
+                is still off on your review day.
               </Row>
               <Row term="The automated bot">
-                It enforces all of this for you: it runs every morning but only
-                trades once a month, holding otherwise, and skips adjustments
-                under ~0.5% of your book.
+                Enforces this for you. Runs every morning, trades once a month,
+                holds otherwise, and skips adjustments under ~0.5% of your book.
               </Row>
             </div>
             <p>
-              The roughly 30-day holding period in the backtest is not a fixed
-              rule — it just falls out of reviewing monthly, and a strong stock
-              is held for as many months as it keeps qualifying.
+              The ~30-day holding period in the backtest is not a rule. It falls
+              out of reviewing monthly, and a strong stock is held for as long as
+              it keeps qualifying.
             </p>
             <p className="text-xs text-gray-400">
-              Why the review frequency matters so much: identical rules, tested
-              monthly, return ~25.6% a year with a 23% worst-case fall. Weekly
-              roughly halves that. Daily gives ~0% with a 42% fall.
+              Why frequency matters: identical rules return ~25.6% a year
+              monthly (23% worst fall), roughly half that weekly, and ~0% daily
+              (42% fall).
             </p>
           </Section>
 
           <Section id="portfolio-journal" title="Portfolio and Journal" icon={TableIcon}>
             <div className="space-y-3">
               <Row term="Portfolio">
-                Your actual Trading212 holdings (read-only), one row per ticker
-                you currently own, cross-checked against today&apos;s Signal
-                Book status, the same check used for the sell decision above.
+                Your Trading212 holdings (read-only), one row per ticker,
+                checked against today&apos;s Signal Book status.
               </Row>
               <Row term="Journal">
-                Every filled Trading212 order, individually, not aggregated
-                like Portfolio. Each trade shows its Signal Book weight both{" "}
-                <strong>at the time you traded</strong> and <strong>now</strong>,
-                so you can see whether you followed the strategy and whether
-                that pick has since dropped off the list.
+                Every filled order individually. Each shows its Signal Book
+                weight <strong>when you traded</strong> and <strong>now</strong>,
+                so you can see whether you followed the strategy.
               </Row>
             </div>
           </Section>
 
           <Section id="browse" title="The Browse page" icon={GridIcon}>
             <p>
-              Browse is for exploring stocks you <strong>don&apos;t currently
-              hold</strong> (anything in your Portfolio is excluded
-              automatically). It has no scores or badges, on purpose, it is a
-              plain, quick way to look around the universe, not a second
-              decision system.
+              Browse covers stocks you <strong>don&apos;t hold</strong>{" "}
+              (Portfolio names are excluded). No scores or badges by design: a
+              quick way to look around, not a second decision system.
             </p>
             <div className="space-y-3 pt-1">
               <Row term="Group tabs">
-                All / Core / Quality Value / Niche Growth / Global, filtering
-                which sleeve of the universe you are looking at.
+                All / Core / Quality Value / Niche Growth / Global / Emerging
+                Markets, filtering which sleeve you are looking at.
               </Row>
               <Row term="1M / 3M / 6M / 1Y">
-                Changes the return shown on every card and the sparkline range,
-                plus which names appear under Top gainers/losers.
+                Changes the return and sparkline range on each card, and which
+                names appear under Top gainers/losers.
               </Row>
               <Row term="Top gainers / losers">
-                The five best and worst performers over the selected period,
-                scoped to whichever group tab is currently active.
+                Best and worst five over the selected period, scoped to the
+                active tab.
               </Row>
               <Row term="Search">
-                Filters by ticker or company name across whichever group is
-                selected.
+                Filters by ticker or name within the selected group.
               </Row>
             </div>
             <p>
-              Clicking any card opens the same chart page used everywhere else in
-              the app, with that stock&apos;s Signal Book status, fundamentals
-              and sentiment if you want that context, it is just not shown on
-              the Browse cards themselves.
+              Clicking a card opens the full chart page, with that stock&apos;s
+              Signal Book status, fundamentals and sentiment.
             </p>
           </Section>
 
           <Section id="sentiment" title="News sentiment, explained" icon={ChatIcon}>
             <p>
-              Every day the system collects headlines about each stock from free
-              news feeds and scores each one from <strong>-1 (very
-              negative)</strong> to <strong>+1 (very positive)</strong> using
-              VADER, a standard text-analysis model. Recent headlines count more
-              than old ones, and a stock&apos;s sentiment number is the weighted
-              average over the last few days. Historical sentiment (back to
-              2022) comes from Alpha Vantage, which scores professional
-              financial news articles the same way. The Signal Book uses this as
-              a secondary tilt on top of momentum, not a gate on its own.
+              Each day the system scores headlines from free news feeds using
+              VADER, from <strong>-1 (very negative)</strong> to{" "}
+              <strong>+1 (very positive)</strong>. Recent headlines count more,
+              and a stock&apos;s number is the weighted average over the last few
+              days. History back to 2022 comes from Alpha Vantage. The Signal
+              Book uses this as a secondary tilt on momentum, not a gate.
             </p>
             <p className="text-xs text-gray-400">
-              Note: sentiment history for the newer stocks in the universe is still
-              being collected (the free data source allows ~25 requests per day), so
-              some names have no score yet — the emerging-markets group especially.
-              Where a score is missing the stock is treated as{" "}
-              <em>average</em> rather than as bad news, so a gap in the data can
-              never count against a stock. The historical Backtest page runs on
-              momentum alone for the same reason: sentiment history only starts in
-              2022 and does not yet cover enough of the universe to test fairly.
+              History for newer names is still being collected (~25 requests a
+              day), so some have no score yet, the emerging-markets group
+              especially. A missing score counts as <em>average</em>, not bad
+              news, so a data gap never counts against a stock. The Backtest page
+              runs on momentum alone for the same reason.
             </p>
           </Section>
 
           <Section id="timeframes" title="Timeframes: what the model uses vs what you see" icon={TimeIcon}>
             <div className="space-y-3">
               <Row term="Model horizon">
-                The Signal Book is built for a <strong>weeks-to-months</strong>{" "}
-                holding period, not day trading. Its core signal is &quot;12-1
-                momentum&quot;: the return over the last 12 months, excluding the
-                most recent month. The last month is skipped deliberately, because
-                stocks that just spiked tend to pull back short-term.
+                Built for <strong>weeks-to-months</strong> holds, not day
+                trading. The core signal is 12-1 momentum: the 12-month return
+                excluding the most recent month, which is skipped because stocks
+                that just spiked tend to pull back.
               </Row>
               <Row term="1M / 3M / 6M / 1Y toggle">
-                The toggle on the Browse page only changes the return shown and
-                the sparkline range on each card. It never touches the Signal
-                Book underneath, so you can check how a stock has behaved
-                recently without anything actually being recalculated.
+                Only changes the return and sparkline shown on Browse cards. It
+                never touches the Signal Book underneath.
               </Row>
               <Row term="Other indicators">
-                RSI uses 14 days (the industry standard), the trend filter uses a
-                200-day average, and volatility uses the last 3 months of daily moves.
+                RSI 14 days, trend filter 200-day average, volatility from the
+                last 3 months of daily moves.
               </Row>
             </div>
           </Section>
 
           <Section id="value-radar" title="Value score and the Radar tag" icon={ShootingStarIcon}>
             <p>
-              Independent of the Signal Book, each stock also gets a{" "}
-              <strong>Value score</strong> measuring pure cheapness: forward
-              P/E, EV/EBITDA, price-to-book, price-to-sales and PEG, each ranked
-              across the universe. It is a separate lens for hunting bargains,
-              not a factor in what the Signal Book picks or how it sizes
-              positions.
+              Separate from the Signal Book, each stock gets a{" "}
+              <strong>Value score</strong> for cheapness: forward P/E, EV/EBITDA,
+              price-to-book, price-to-sales and PEG, ranked across the universe.
+              A lens for bargains, not a factor in what gets picked.
             </p>
             <p>
-              The <strong>Radar</strong> tag marks stocks with strong
-              fundamentals, a cheap valuation and quiet news at the same time.
-              That is the classic &quot;good company, nobody excited yet&quot;
-              setup. Mega-caps (above roughly $200B) are excluded on principle: a
-              trillion-dollar company with neutral headlines is heavily covered
-              news balancing out, not a stock nobody is watching.
+              The <strong>Radar</strong> tag marks strong fundamentals, cheap
+              valuation and quiet news together: the &quot;good company, nobody
+              excited yet&quot; setup. Mega-caps above ~$200B are excluded, since
+              neutral headlines there mean heavy coverage balancing out, not
+              obscurity.
             </p>
           </Section>
 
           <Section id="universe" title="The universe: five groups of stocks" icon={GroupIcon}>
             <div className="space-y-3">
               <Row term="Core">
-                Around 58 large US companies (Apple, JPMorgan, Chevron...). The
-                stable backbone with the deepest data history.
+                ~58 large US companies (Apple, JPMorgan, Chevron). The stable
+                backbone with the deepest data history.
               </Row>
               <Row term="Quality Value">
-                Around 32 excellent but under-covered businesses: high returns on
-                capital, sensible prices, little media attention (McKesson, AutoZone,
-                Chubb, homebuilders).
+                ~32 under-covered businesses: high returns on capital, sensible
+                prices, little media attention (McKesson, AutoZone, Chubb).
               </Row>
               <Row term="Niche Growth">
-                Around 22 liquid mid-cap growth names with real revenue (CrowdStrike,
-                Datadog, Axon). The most speculative story stocks are deliberately
-                excluded.
+                ~22 liquid mid-cap growth names with real revenue (CrowdStrike,
+                Datadog, Axon). Speculative story stocks are excluded.
               </Row>
               <Row term="Global (developed)">
-                Around 19 developed-market leaders outside the US, held via their
-                US-listed ADR (ASML, Novo Nordisk, Toyota, Sony), plus five cheap
-                European quality names from the Lightman funds (Roche, Nestle,
-                Danone, KPN, DHL).
+                ~19 developed-market leaders outside the US via US-listed ADRs
+                (ASML, Novo Nordisk, Toyota, Sony), plus five cheap European
+                quality names (Roche, Nestle, Danone, KPN, DHL).
               </Row>
               <Row term="Emerging Markets">
-                Around 25 emerging-market companies across 11 countries, again
-                only via US-listed ADRs (TSMC, Alibaba, HDFC Bank, Itau,
-                MercadoLibre, Gold Fields). Liquid large and mid caps only. Two
-                well-known names are deliberately absent: Tencent and Samsung
-                have no properly traded US listing, and their thinly-traded
+                ~25 emerging-market companies across 11 countries, again only
+                via US-listed ADRs (TSMC, Alibaba, HDFC Bank, Itau, MercadoLibre,
+                Gold Fields). Liquid large and mid caps only. Tencent and Samsung
+                are absent: neither has a properly traded US listing, and their
                 stand-ins give unreliable prices.
               </Row>
             </div>
             <p className="pt-1 text-xs text-gray-400">
-              Emerging markets are held for diversification rather than for
-              extra return. On the historical test they performed roughly in
-              line with the rest of the book, and because this test can only
-              include companies that still exist today, their real record is if
-              anything slightly flattered.
+              Emerging markets are held for diversification, not extra return.
+              They performed roughly in line with the rest of the book, and since
+              the test only includes companies that still exist, that record is if
+              anything flattered.
             </p>
           </Section>
 
