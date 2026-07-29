@@ -53,6 +53,47 @@ cd frontend && npm install && npm run dev  # terminal 2 — http://localhost:300
 - Keep the Streamlit dashboard working — it's the research console; the
   Next.js app is the consumer-style UI on the same pipeline.
 
+## Rebalance cadence is most of the strategy — do not let live drift from it
+
+The single most damaging bug found in this project. `run_trading_bot.bat` is a
+scheduled task with `DaysInterval: 1`, and `execute_trades()` used to compute a
+fresh book for *today* with no gate, so the bot rebalanced **daily** while the
+backtest rebalances **monthly**. Same rules, only the cadence changed
+(2016–2026, measured):
+
+| Rebalance | CAGR | Sharpe | MaxDD | Avg hold | Turnover/yr |
+|-----------|------|--------|-------|----------|-------------|
+| monthly (backtest) | **+25.61%** | 1.275 | -23.4% | 37d | 19x |
+| weekly | +13.60% | 0.756 | -25.7% | 11d | 64x |
+| daily (bot, pre-fix) | **-0.29%** | 0.077 | **-41.7%** | 4d | 192x |
+
+The ~37-day hold is the MECHANISM, not a side effect: momentum needs weeks to
+pay out, and the RSI-band entry rule makes names flicker on and off the book
+day to day. Reacting to that flicker pays costs on every wobble and sells
+winners early.
+
+Rules that follow:
+1. **The bot derives its cadence from `CFG.portfolio.rebalance`** — the same
+   setting the backtest uses. Never add a separate live cadence setting; that
+   is exactly how the two silently diverged. Changing that one value moves both.
+2. **The gate tests for a period CHANGE, not "is today month-end".**
+   `backtest._rebalance_dates()` does `groupby(period).last()`, so for the
+   current *incomplete* month it returns today — reusing it live marks every
+   day a rebalance day, recreating the bug. Verified.
+3. Acting on the first run of a NEW period is equivalent to the backtest, not a
+   compromise: the backtest computes at month-end close and executes
+   `shift(execution_delay_days=1)` — the first trading day of the next period.
+4. State lives in `data/bot_state.json` and is written **only after orders
+   actually place**, so a dry run or an all-failed run doesn't consume the
+   period. `--force` overrides for a manual rebalance.
+5. `min_trade_pct_of_book` (0.5%, live only) skips adjustments too small to
+   beat the spread — the executor previously fired on any delta above 0.01
+   *shares*. Full exits are never banded or dust accumulates permanently.
+
+If anyone proposes mid-month exits, weekly rebalancing, or "just react when a
+holding drops off", the numbers above are the answer. Any such change needs its
+own A/B before it goes live.
+
 ## ALWAYS update the Data & Model page
 
 `frontend/src/app/(admin)/(others-pages)/profile/page.tsx` (component
