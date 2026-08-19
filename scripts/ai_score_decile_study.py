@@ -142,8 +142,14 @@ def forward_return(px: pd.DataFrame, date: pd.Timestamp,
 # ──────────────────────────────────────────────────────────────────────────
 # Study
 # ──────────────────────────────────────────────────────────────────────────
-def build_observations(px: pd.DataFrame, horizons: list[int]) -> pd.DataFrame:
-    """One row per (date, ticker): its AI Score, action label and forward returns."""
+def build_observations(px: pd.DataFrame, horizons: list[int],
+                       technical_fn=None) -> pd.DataFrame:
+    """One row per (date, ticker): its AI Score, action label and forward returns.
+
+    `technical_fn` is passed through to compute_ai_score so a candidate
+    technical layer can be measured on the same cross-sections — see
+    scripts/ai_score_layer_ab.py.
+    """
     panels = momentum.build_panels(px)
     sent_panel = load_sentiment_panel(px.index, list(px.columns))
 
@@ -158,7 +164,7 @@ def build_observations(px: pd.DataFrame, horizons: list[int]) -> pd.DataFrame:
         frame = scoring_frame(date, px, panels, sent_panel)
         if len(frame) < 20:          # too thin for a 10-bucket cross-section
             continue
-        scored = compute_ai_score(frame)
+        scored = compute_ai_score(frame, technical_fn=technical_fn)
         fwd = {h: forward_return(px, date, h) for h in horizons}
 
         for ticker, r in scored.iterrows():

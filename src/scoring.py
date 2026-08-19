@@ -169,15 +169,22 @@ def _value_layer(df: pd.DataFrame) -> tuple[pd.Series, float]:
     return score.clip(0, 1), min(used / 1.0, 1.0)
 
 
-def compute_ai_score(signals_df: pd.DataFrame) -> pd.DataFrame:
+def compute_ai_score(signals_df: pd.DataFrame,
+                     technical_fn=None) -> pd.DataFrame:
     """
     Add ai_score (1–10), action, per-layer sub-scores, rank_pct and
     confidence_pct to a per-ticker signals DataFrame. Never raises on
     missing columns — the blend renormalises over whatever data exists.
+
+    `technical_fn` swaps the technical layer for a candidate implementation
+    with the same (score in [0,1], weight used) contract. Defaults to the
+    shipping `_technical_layer`; it exists so research scripts
+    (scripts/ai_score_layer_ab.py) can A/B a layer against forward returns
+    without editing production scoring. Do not pass it from app code.
     """
     df = signals_df.copy()
 
-    tech, tech_used = _technical_layer(df)
+    tech, tech_used = (technical_fn or _technical_layer)(df)
     sent, sent_used = _sentiment_layer(df)
     fund, fund_used = _fundamental_layer(df)
 
