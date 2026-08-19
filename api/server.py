@@ -88,6 +88,20 @@ if not _log.handlers:
     _rh.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
     _log.addHandler(_rh)
 
+
+@app.middleware("http")
+async def _request_logger(request: Request, call_next) -> _StarResponse:
+    # Never log the Authorization header or any header dict wholesale (P#35).
+    # Log path only — strip query-string values to avoid leaking tokens in URLs.
+    path = request.url.path
+    qs_keys = "&".join(k for k in request.query_params) if request.query_params else ""
+    log_path = f"{path}?{qs_keys}" if qs_keys else path
+    t0 = time.perf_counter()
+    response = await call_next(request)
+    duration_ms = round((time.perf_counter() - t0) * 1000)
+    _log.info("%s %s %s %dms", request.method, log_path, response.status_code, duration_ms)
+    return response
+
 # ──────────────────────────────────────────────────────────────────────────
 # Auth. Every route requires `Authorization: Bearer $API_SECRET_KEY`.
 #
