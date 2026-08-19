@@ -27,6 +27,8 @@ SOP Memory
 edits
 transcript
 transcript *
+promp*
+prompt*
 
 # Live bot runtime state. Machine-local on purpose: a clone inheriting
 # another machine rebalance history could wrongly believe this period was
