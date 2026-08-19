@@ -59,6 +59,22 @@ app.add_middleware(
 )
 
 # ──────────────────────────────────────────────────────────────────────────
+# Security headers — set on every response.
+# No HSTS: this server runs over plain HTTP on localhost; HSTS would pin the
+# browser to HTTPS and break the app.
+# ──────────────────────────────────────────────────────────────────────────
+from starlette.responses import Response as _StarResponse
+
+@app.middleware("http")
+async def _security_headers(request: Request, call_next) -> _StarResponse:
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    return response
+
+
+# ──────────────────────────────────────────────────────────────────────────
 # Logging — rotating file handler so the log cannot grow unbounded.
 # ──────────────────────────────────────────────────────────────────────────
 import logging.handlers as _lh
