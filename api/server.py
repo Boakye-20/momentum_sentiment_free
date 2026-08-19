@@ -14,6 +14,7 @@ from __future__ import annotations
 import base64
 import collections
 import hmac
+import logging
 import math
 import os
 import re
@@ -56,6 +57,20 @@ app.add_middleware(
     allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
+
+# ──────────────────────────────────────────────────────────────────────────
+# Logging — rotating file handler so the log cannot grow unbounded.
+# ──────────────────────────────────────────────────────────────────────────
+import logging.handlers as _lh
+
+_log = logging.getLogger("api.server")
+_log.setLevel(logging.INFO)
+if not _log.handlers:
+    _rh = _lh.RotatingFileHandler(
+        "api-server.log", maxBytes=5 * 1024 * 1024, backupCount=3
+    )
+    _rh.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+    _log.addHandler(_rh)
 
 # ──────────────────────────────────────────────────────────────────────────
 # Auth. Every route requires `Authorization: Bearer $API_SECRET_KEY`.
@@ -712,9 +727,11 @@ def _run_backtest_job(key: str, use_sentiment: bool) -> None:
             _bt_jobs[key] = {"status": "done", "ts": time.time(),
                              "result": result}
     except Exception as e:
+        _log.exception("Backtest job %s failed: %s", key, e)
         with _bt_lock:
             _bt_jobs[key] = {"status": "error", "ts": time.time(),
-                             "message": str(e)}
+                             "message": "Backtest failed. Check server logs.",
+                             "detail": str(e)}
 
 
 @app.get("/api/backtest", dependencies=[Depends(require_auth)])
