@@ -1,16 +1,9 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  async rewrites() {
-    // Proxy API calls to the FastAPI backend (uvicorn api.server:app --port 8000)
-    return [
-      {
-        source: "/api/:path*",
-        destination:
-          (process.env.API_URL ?? "http://127.0.0.1:8000") + "/api/:path*",
-      },
-    ];
-  },
+  // The /api/* proxy to the FastAPI backend lives in src/middleware.ts, not
+  // here: a config rewrite cannot attach the Authorization header the backend
+  // now requires. Two mechanisms on one path would race, so this stays empty.
   webpack(config) {
     config.module.rules.push({
       test: /\.svg$/,

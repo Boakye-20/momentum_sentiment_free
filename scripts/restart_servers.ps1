@@ -166,7 +166,16 @@ function Wait-Health {
                 Write-Host "$Name is up ($Url)."
                 return $true
             }
-        } catch {}
+        } catch {
+            # 401/503 mean the app is up and answering — the probe just sends
+            # no API key. Only a connection failure means "not started yet",
+            # so an authenticated endpoint must not read as a dead server.
+            $code = $_.Exception.Response.StatusCode.value__
+            if ($code -eq 401 -or $code -eq 503) {
+                Write-Host "$Name is up ($Url, HTTP $code - auth required)."
+                return $true
+            }
+        }
         Start-Sleep -Seconds 1
     }
     Write-Warning "$Name did not answer $Url within ${TimeoutSeconds}s - check its window for a startup error."

@@ -12,6 +12,8 @@ Optional: set T212_API_KEY (Trading212 Settings > API (Beta)) to enable
 from __future__ import annotations
 
 import base64
+import collections
+import hmac
 import math
 import os
 import re
@@ -32,7 +34,7 @@ except ImportError:
 
 import numpy as np
 import pandas as pd
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -54,6 +56,61 @@ app.add_middleware(
     allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
+
+# ──────────────────────────────────────────────────────────────────────────
+# Auth. Every route requires `Authorization: Bearer $API_SECRET_KEY`.
+#
+# Fails CLOSED: with no API_SECRET_KEY set, every request is refused rather
+# than served openly. Binding to 127.0.0.1 is not a security boundary — one
+# `--host 0.0.0.0`, port forward or tunnel turns this into a public endpoint
+# serving real Trading212 positions and an OpenAI key that costs money per
+# call. Generate a key with:  python -c "import secrets;print(secrets.token_hex(32))"
+# ──────────────────────────────────────────────────────────────────────────
+def require_auth(request: Request) -> None:
+    expected = os.environ.get("API_SECRET_KEY", "").strip()
+    if not expected or expected.startswith("your_"):
+        raise HTTPException(
+            503,
+            "API_SECRET_KEY is not set in .env — the API refuses to serve "
+            "unauthenticated requests. Generate one with: "
+            'python -c "import secrets;print(secrets.token_hex(32))"',
+        )
+    header = request.headers.get("authorization", "")
+    scheme, _, token = header.partition(" ")
+    # compare_digest keeps the check constant-time (no early-exit timing leak)
+    if scheme.lower() != "bearer" or not hmac.compare_digest(token.strip(), expected):
+        raise HTTPException(401, "Invalid or missing API key.")
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Rate limiting. Only /api/copilot needs it — it is the one route that spends
+# real money (an OpenAI call per request) and the one an unbounded loop could
+# drain a credit balance through. Fixed-window counter per client IP, kept in
+# memory: this is a single-process local server, so a shared store would be
+# ceremony without benefit.
+# ──────────────────────────────────────────────────────────────────────────
+_COPILOT_RATE_LIMIT = 20        # requests …
+_COPILOT_RATE_WINDOW = 60       # … per this many seconds, per IP
+_rate_lock = threading.Lock()
+_rate_hits: dict[str, collections.deque] = {}
+
+
+def rate_limit_copilot(request: Request) -> None:
+    ip = request.client.host if request.client else "unknown"
+    now = time.time()
+    with _rate_lock:
+        hits = _rate_hits.setdefault(ip, collections.deque())
+        while hits and now - hits[0] > _COPILOT_RATE_WINDOW:
+            hits.popleft()
+        if len(hits) >= _COPILOT_RATE_LIMIT:
+            retry = int(_COPILOT_RATE_WINDOW - (now - hits[0])) + 1
+            raise HTTPException(
+                429,
+                f"Rate limit reached ({_COPILOT_RATE_LIMIT} copilot requests "
+                f"per {_COPILOT_RATE_WINDOW}s). Try again in {retry}s.",
+            )
+        hits.append(now)
+
 
 _SPARK = 252         # ~1 year of dailies; frontend slices per timeframe
 _TTL = 15 * 60       # screener cache TTL (seconds)
@@ -203,7 +260,7 @@ def _screener_df() -> tuple[pd.DataFrame, str]:
     return _cache["df"], _cache["as_of"]
 
 
-@app.get("/api/screener")
+@app.get("/api/screener", dependencies=[Depends(require_auth)])
 def screener():
     df, as_of = _screener_df()
     records = []
@@ -215,7 +272,7 @@ def screener():
     return {"as_of": as_of, "count": len(records), "stocks": records}
 
 
-@app.get("/api/stock/{ticker}")
+@app.get("/api/stock/{ticker}", dependencies=[Depends(require_auth)])
 def stock(ticker: str):
     df, as_of = _screener_df()
     t = ticker.upper()
@@ -265,7 +322,7 @@ def _fetch_t212_positions(host: str, auth: str) -> list:
     raise HTTPException(502, f"Trading212 request failed: {last_err}")
 
 
-@app.get("/api/portfolio")
+@app.get("/api/portfolio", dependencies=[Depends(require_auth)])
 def portfolio():
     """Trading212 open positions joined against AI Scores (read-only)."""
     key = os.environ.get("T212_API_KEY", "").strip()
@@ -474,7 +531,7 @@ def _signal_weights_at(date_key: str) -> pd.Series:
     return w
 
 
-@app.get("/api/journal")
+@app.get("/api/journal", dependencies=[Depends(require_auth)])
 def journal():
     """Trade journal: your actual FILLED T212 orders (demo or live,
     whichever T212_ENV points at), cross-checked against the Signal Book
@@ -544,7 +601,7 @@ def journal():
             "count": len(orders), "trades": orders}
 
 
-@app.get("/api/meta")
+@app.get("/api/meta", dependencies=[Depends(require_auth)])
 def meta():
     df, as_of = _screener_df()
     px = _cache["px"]
@@ -559,7 +616,7 @@ def meta():
     }
 
 
-@app.get("/api/signals")
+@app.get("/api/signals", dependencies=[Depends(require_auth)])
 def signals_endpoint(capital: float = 100_000.0):
     """Today's Signal Book: names passing the entry filter (src/signals.py),
     inverse-vol weighted, with a suggested £ allocation and share count for
@@ -660,7 +717,7 @@ def _run_backtest_job(key: str, use_sentiment: bool) -> None:
                              "message": str(e)}
 
 
-@app.get("/api/backtest")
+@app.get("/api/backtest", dependencies=[Depends(require_auth)])
 def backtest(sentiment: bool = False):
     key = f"sent={sentiment}"
     with _bt_lock:
@@ -766,7 +823,8 @@ def _mentioned_tickers(text: str, universe: list[str], limit: int = 5) -> list[s
     return [t for t in universe if t in words][:limit]
 
 
-@app.post("/api/copilot")
+@app.post("/api/copilot",
+          dependencies=[Depends(require_auth), Depends(rate_limit_copilot)])
 def copilot(req: CopilotRequest):
     key = os.environ.get("OPENAI_API_KEY", "").strip()
     if key.startswith("your_"):
