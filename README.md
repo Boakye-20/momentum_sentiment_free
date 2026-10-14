@@ -5,6 +5,8 @@ uptrend, scores them 1 to 10, and builds a monthly portfolio from the best.
 It covers 156 global stocks and runs entirely on free data.
 
 ![The Signals page: the 15 stocks the strategy would hold today, with weights, suggested allocations, momentum, RSI and sentiment](docs/screenshot.png)
+![Uploading image.png…]()
+
 
 > Not investment advice. This is a research tool. The backtest results below
 > are survivorship-biased (see [Limitations](#limitations)).
