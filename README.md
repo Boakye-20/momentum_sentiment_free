@@ -4,7 +4,7 @@ A research and backtesting tool that finds stocks pulling back inside a strong
 uptrend, scores them 1 to 10, and builds a monthly portfolio from the best.
 It covers 156 global stocks and runs entirely on free data.
 
-![The Browse page: top gainers and losers, then every stock in the universe with its 3-month trend](docs/screenshot.png)
+![The Signals page: the 15 stocks the strategy would hold today, with weights, suggested allocations, momentum, RSI and sentiment](docs/screenshot.png)
 
 > Not investment advice. This is a research tool. The backtest results below
 > are survivorship-biased (see [Limitations](#limitations)).
